@@ -113,7 +113,8 @@ function buildWeeklySeries(
   entries: EventEntry[],
   endLimitDate?: DateTime | null,
   startLimitDate?: DateTime | null,
-  _extendToEndDate = false
+  _extendToEndDate = false,
+  postEventWeeks = 0
 ) {
   const paidDates = entries
     .filter((entry) => coerceBoolean(entry.is_paid) === true)
@@ -128,7 +129,7 @@ function buildWeeklySeries(
   const maxDate = paidDates.reduce((max, date) => (date > max ? date : max), paidDates[0]);
   const paddedStart = minDate.minus({ weeks: 1 });
   const paddedEnd = maxDate.plus({ weeks: 1 });
-  const endLimitWithPadding = endLimitDate ? endLimitDate.plus({ weeks: 1 }) : null;
+  const endLimitWithPadding = endLimitDate ? endLimitDate.plus({ weeks: postEventWeeks }) : null;
   const startDate =
     startLimitDate && startLimitDate > paddedStart ? startLimitDate : paddedStart;
   const endDate = endLimitWithPadding ?? paddedEnd;
@@ -224,7 +225,8 @@ function buildDonationSeries(
   donations: DonationRow[],
   endLimitDate?: DateTime | null,
   startLimitDate?: DateTime | null,
-  _extendToEndDate = false
+  _extendToEndDate = false,
+  postEventWeeks = 1
 ) {
   const donationPoints = donations
     .filter((donation) => donation.d_status === "paid")
@@ -252,7 +254,7 @@ function buildDonationSeries(
   );
   const paddedStart = minDate.minus({ weeks: 1 });
   const paddedEnd = maxDate.plus({ weeks: 1 });
-  const endLimitWithPadding = endLimitDate ? endLimitDate.plus({ weeks: 1 }) : null;
+  const endLimitWithPadding = endLimitDate ? endLimitDate.plus({ weeks: postEventWeeks }) : null;
   const startDate =
     startLimitDate && startLimitDate > paddedStart ? startLimitDate : paddedStart;
   const endDate = endLimitWithPadding ?? paddedEnd;
@@ -756,14 +758,16 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     primaryEntries,
     primaryEventDate,
     registrationStartDate,
-    projectionEnabled
+    projectionEnabled,
+    0
   );
   const comparisonSeries = comparisonGroup
     ? buildWeeklySeries(
         comparisonEntries,
         comparisonEventDate ? comparisonEventDate.plus({ days: comparisonOffsetDays }) : null,
         getRegistrationStartDate(comparisonEntries, 10),
-        true
+        true,
+        0
       )
     : null;
   const comparisonSeries2 = comparisonGroup2
@@ -771,7 +775,8 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         comparison2Entries,
         comparison2EventDate ? comparison2EventDate.plus({ days: comparisonOffsetDays }) : null,
         getRegistrationStartDate(comparison2Entries, 10),
-        true
+        true,
+        0
       )
     : null;
   const { chartData: chartDataPrimaryCompare } = buildComparisonChartData(
@@ -800,7 +805,8 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         data.entries,
         eventDate,
         getRegistrationStartDate(data.entries, 10),
-        true
+        true,
+        0
       );
       return {
         series: series.series,
@@ -864,6 +870,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     ])
   );
   let projectionTotal: number | null = null;
+  let projectionEventValue: number | null = null;
   let projectionScaleTotal = 1;
   let projectionScaleRecent = 1;
   let baselineAtProjection: number | null = null;
@@ -918,6 +925,15 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
       };
     }
     const clampedRecentScale = Math.min(Math.max(projectionScaleRecent, 0.8), 1.2);
+    const baselineEventValue = baselineByWeek.get(0) ?? null;
+    if (baselineEventValue !== null && baselineAtProjection !== null) {
+      projectionEventValue =
+        (baselineEventValue - baselineAtProjection) * clampedRecentScale +
+        baselineAtProjection * projectionScaleTotal;
+    }
+    if (projectionEventValue !== null) {
+      projectionTotal = projectionEventValue;
+    }
     const baseProjection =
       (baselineValue - baselineAtProjection) * clampedRecentScale +
       (point.weekIndex === projectionWeeksBeforeEvent
@@ -1076,6 +1092,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     ])
   );
   let donationProjectionTotal: number | null = null;
+  let donationProjectionEventValue: number | null = null;
   let donationScaleTotal = 1;
   let donationScaleRecent = 1;
   let donationBaselineAtProjection: number | null = null;
@@ -1129,6 +1146,12 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
       return { ...point, projection: null };
     }
     const clampedRecentScale = Math.min(Math.max(donationScaleRecent, 0.8), 1.2);
+    const baselineEventValue = donationBaselineByWeek.get(0) ?? null;
+    if (baselineEventValue !== null && donationBaselineAtProjection !== null) {
+      donationProjectionEventValue =
+        (baselineEventValue - donationBaselineAtProjection) * clampedRecentScale +
+        donationBaselineAtProjection * donationScaleTotal;
+    }
     const baseProjection =
       (baselineValue - donationBaselineAtProjection) * clampedRecentScale +
       (point.weekIndex === donationProjectionWeeksBeforeEvent
@@ -1286,9 +1309,11 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
                     : "Current registrations"}
               </p>
               <p className="text-2xl font-semibold">
-                {projectionEnabled && projectionTotal !== null
-                  ? Math.round(projectionTotal).toLocaleString("en-AU")
-                  : currentPrimaryValue.toLocaleString("en-AU")}
+                {projectionEnabled && projectionEventValue !== null
+                  ? Math.round(projectionEventValue).toLocaleString("en-AU")
+                  : projectionEnabled && projectionTotal !== null
+                    ? Math.round(projectionTotal).toLocaleString("en-AU")
+                    : currentPrimaryValue.toLocaleString("en-AU")}
               </p>
               {projectionEnabled ? (
                 <p className="text-xs text-muted-foreground">
@@ -1414,9 +1439,11 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
                     : "Current donations"}
               </p>
               <p className="text-2xl font-semibold">
-                {projectionEnabled && donationProjectionTotal !== null
-                  ? formatCurrency(donationProjectionTotal)
-                  : formatCurrency(currentDonationValue)}
+                {projectionEnabled && donationProjectionEventValue !== null
+                  ? formatCurrency(donationProjectionEventValue)
+                  : projectionEnabled && donationProjectionTotal !== null
+                    ? formatCurrency(donationProjectionTotal)
+                    : formatCurrency(currentDonationValue)}
               </p>
               {projectionEnabled ? (
                 <p className="text-xs text-muted-foreground">
