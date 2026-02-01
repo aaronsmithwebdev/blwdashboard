@@ -856,7 +856,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
       ? primarySeries.series.findIndex((point) => point.weekIndex === projectionWeeksBeforeEvent)
       : -1;
 
-  const weightedBaseline = buildWeightedBaselineSeries(primarySeries, weightedComparisonSeries);
+  const weightedBaseline = buildMedianBaselineSeries(primarySeries, weightedComparisonSeries);
   const baselineByWeek = new Map<number, number | null>(
     primarySeries.series.map((point, index) => [
       point.weekIndex,
@@ -877,6 +877,12 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     if (baselineAtProjection && baselineAtProjection > 0) {
       projectionScaleTotal = primaryAtDate / baselineAtProjection;
       projectionTotal = weightedBaseline.baselineTotal * projectionScaleTotal;
+    }
+
+    const registrationProjectionCapMultiplier = 1.1;
+    const registrationProjectionCap = weightedBaseline.baselineTotal * registrationProjectionCapMultiplier;
+    if (projectionTotal && projectionTotal > registrationProjectionCap) {
+      projectionTotal = registrationProjectionCap;
     }
 
     const recentWindow = 4;
@@ -911,7 +917,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         projection: null
       };
     }
-    const clampedRecentScale = Math.min(Math.max(projectionScaleRecent, 0.6), 1.6);
+    const clampedRecentScale = Math.min(Math.max(projectionScaleRecent, 0.8), 1.2);
     const baseProjection =
       (baselineValue - baselineAtProjection) * clampedRecentScale +
       (point.weekIndex === projectionWeeksBeforeEvent

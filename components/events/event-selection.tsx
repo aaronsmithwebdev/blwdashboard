@@ -199,7 +199,14 @@ export function EventSelection({
           checked={projectionOn}
           onChange={(event) => setProjectionOn(event.target.checked)}
         />
-        Show projection
+        <span>Show projection</span>
+        <span
+          title="Projection uses the median of the last 2–3 years at the same weeks before the event, then scales the rest of the curve based on how this year is tracking so far. It smooths the handover and caps overly optimistic results."
+          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-semibold text-muted-foreground"
+          aria-label="Projection info"
+        >
+          i
+        </span>
       </label>
       <Button type="submit">Apply</Button>
     </form>
