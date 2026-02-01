@@ -19,6 +19,7 @@ type ChartDatum = {
   weekLabel: string;
   primary: number | null;
   compare?: number | null;
+  compare2?: number | null;
   projection?: number | null;
   markersPrimary?: string[];
   markersCompare?: string[];
@@ -35,6 +36,7 @@ type RegistrationsAreaChartProps = {
   data: ChartDatum[];
   primaryLabel: string;
   compareLabel?: string | null;
+  compare2Label?: string | null;
   markers?: ChartMarker[];
   projectionLabel?: string | null;
   valueFormat?: "number" | "currency";
@@ -45,6 +47,7 @@ export function RegistrationsAreaChart({
   data,
   primaryLabel,
   compareLabel,
+  compare2Label,
   markers,
   projectionLabel,
   valueFormat = "number",
@@ -84,6 +87,10 @@ export function RegistrationsAreaChart({
               <stop offset="5%" stopColor="hsl(var(--accent))" stopOpacity={0.28} />
               <stop offset="95%" stopColor="hsl(var(--accent))" stopOpacity={0.02} />
             </linearGradient>
+            <linearGradient id="registrationsCompareAlt" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="hsl(200 60% 55%)" stopOpacity={0.22} />
+              <stop offset="95%" stopColor="hsl(200 60% 55%)" stopOpacity={0.02} />
+            </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="4 6" stroke="hsl(var(--border))" opacity={0.6} />
           <XAxis
@@ -94,6 +101,7 @@ export function RegistrationsAreaChart({
             tickMargin={12}
             tickFormatter={(value) => labelByIndex.get(Number(value)) ?? value}
             tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
+            reversed={false}
           />
           <YAxis
             tickLine={false}
@@ -112,7 +120,11 @@ export function RegistrationsAreaChart({
               return (
                 <div className="rounded-lg border border-border/60 bg-white/95 p-3 text-xs shadow-lg">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                    Week ending {displayLabel}
+                    {displayLabel === "Event"
+                      ? "Event week"
+                      : displayLabel.includes("after")
+                        ? `${displayLabel.replace("w", " week")} after event`
+                        : `${displayLabel.replace("w", " week")} before event`}
                   </p>
                   <div className="mt-2 space-y-1">
                     {payload.map((entry, index) => (
@@ -171,6 +183,18 @@ export function RegistrationsAreaChart({
               stroke="hsl(var(--accent))"
               strokeWidth={2}
               fill="url(#registrationsCompare)"
+              dot={false}
+              isAnimationActive={false}
+            />
+          ) : null}
+          {compare2Label ? (
+            <Area
+              type="monotone"
+              dataKey="compare2"
+              name={compare2Label}
+              stroke="hsl(200 60% 55%)"
+              strokeWidth={2}
+              fill="url(#registrationsCompareAlt)"
               dot={false}
               isAnimationActive={false}
             />

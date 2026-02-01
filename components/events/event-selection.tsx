@@ -16,6 +16,7 @@ type EventSelectionProps = {
   groups: EventGroupOption[];
   selectedGroupId: string;
   selectedCompareId: string | null;
+  selectedCompare2Id: string | null;
   offsetDays: number;
   projectionEnabled: boolean;
   projectionDate: string;
@@ -29,6 +30,7 @@ export function EventSelection({
   groups,
   selectedGroupId,
   selectedCompareId,
+  selectedCompare2Id,
   offsetDays,
   projectionEnabled,
   projectionDate
@@ -36,6 +38,7 @@ export function EventSelection({
   const initialGroup = groups.find((group) => group.id === selectedGroupId) ?? groups[0];
   const [groupId, setGroupId] = useState(initialGroup?.id ?? "");
   const [compareId, setCompareId] = useState(selectedCompareId ?? "none");
+  const [compare2Id, setCompare2Id] = useState(selectedCompare2Id ?? "none");
   const [offset, setOffset] = useState(offsetDays);
   const [projectionOn, setProjectionOn] = useState(projectionEnabled);
   const [projectionDay, setProjectionDay] = useState(projectionDate);
@@ -48,6 +51,18 @@ export function EventSelection({
     setProjectionDay(projectionDate);
   }, [projectionDate]);
 
+  useEffect(() => {
+    setOffset(offsetDays);
+  }, [offsetDays]);
+
+  useEffect(() => {
+    setCompareId(selectedCompareId ?? "none");
+  }, [selectedCompareId]);
+
+  useEffect(() => {
+    setCompare2Id(selectedCompare2Id ?? "none");
+  }, [selectedCompare2Id]);
+
   const selectedGroup = groups.find((group) => group.id === groupId) ?? groups[0];
   const relatedGroups = selectedGroup
     ? groups
@@ -56,6 +71,9 @@ export function EventSelection({
     : [];
   const compareOptions = selectedGroup
     ? relatedGroups.filter((group) => group.id !== selectedGroup.id)
+    : [];
+  const compare2Options = selectedGroup
+    ? relatedGroups.filter((group) => group.id !== selectedGroup.id && group.id !== compareId)
     : [];
 
   useEffect(() => {
@@ -66,6 +84,17 @@ export function EventSelection({
     const previousYear = compareOptions.find((group) => group.year === selectedGroup.year - 1);
     setCompareId(previousYear?.id ?? "none");
   }, [compareId, compareOptions, selectedGroup]);
+
+  useEffect(() => {
+    if (!selectedGroup) return;
+    if (compare2Id === "none") return;
+    const isValid = compare2Options.some((group) => group.id === compare2Id);
+    if (isValid) return;
+    const compareYear = compareOptions.find((group) => group.id === compareId)?.year;
+    const fallbackYear = compareYear ? compareYear - 1 : selectedGroup.year - 2;
+    const fallback = compare2Options.find((group) => group.year === fallbackYear);
+    setCompare2Id(fallback?.id ?? "none");
+  }, [compare2Id, compare2Options, compareId, compareOptions, selectedGroup]);
 
   if (!selectedGroup) return null;
 
@@ -88,8 +117,12 @@ export function EventSelection({
             const previousYear = nextCompareOptions.find(
               (group) => group.year === nextGroup.year - 1
             );
+            const previousYear2 = nextCompareOptions.find(
+              (group) => group.year === nextGroup.year - 2
+            );
             setGroupId(nextGroupId);
             setCompareId(previousYear?.id ?? "none");
+            setCompare2Id(previousYear2?.id ?? "none");
           }}
         >
           {groups.map((group) => (
@@ -111,6 +144,24 @@ export function EventSelection({
         >
           <option value="none">No comparison</option>
           {compareOptions.map((group) => (
+            <option key={group.id} value={group.id}>
+              {buildGroupLabel(group)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="compare2">Compare to (2nd)</Label>
+        <select
+          id="compare2"
+          name="compare2"
+          key={`${selectedGroup.id}-${compareId}`}
+          className="h-10 min-w-[200px] rounded-md border border-input bg-background/70 px-3 text-sm"
+          value={compare2Id}
+          onChange={(event) => setCompare2Id(event.target.value)}
+        >
+          <option value="none">No comparison</option>
+          {compare2Options.map((group) => (
             <option key={group.id} value={group.id}>
               {buildGroupLabel(group)}
             </option>
@@ -148,7 +199,7 @@ export function EventSelection({
           checked={projectionOn}
           onChange={(event) => setProjectionOn(event.target.checked)}
         />
-        Show progression
+        Show projection
       </label>
       <Button type="submit">Apply</Button>
     </form>
