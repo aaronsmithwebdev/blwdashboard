@@ -1,12 +1,6 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 
 export function createSupabaseBrowserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error("Missing Supabase environment variables.");
-  }
-
-  return createClient(url, anonKey);
+  // Uses Supabase Auth Helpers to keep the session in secure cookies.
+  return createClientComponentClient();
 }

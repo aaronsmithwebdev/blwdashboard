@@ -754,6 +754,12 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
   }
 
   const registrationStartDate = getRegistrationStartDate(primaryEntries, 10);
+  const comparisonRegistrationStartDate = comparisonGroup
+    ? getRegistrationStartDate(comparisonEntries, 10)
+    : null;
+  const comparison2RegistrationStartDate = comparisonGroup2
+    ? getRegistrationStartDate(comparison2Entries, 10)
+    : null;
   const primarySeries = buildWeeklySeries(
     primaryEntries,
     primaryEventDate,
@@ -765,7 +771,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     ? buildWeeklySeries(
         comparisonEntries,
         comparisonEventDate ? comparisonEventDate.plus({ days: comparisonOffsetDays }) : null,
-        getRegistrationStartDate(comparisonEntries, 10),
+        comparisonRegistrationStartDate,
         true,
         0
       )
@@ -774,7 +780,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     ? buildWeeklySeries(
         comparison2Entries,
         comparison2EventDate ? comparison2EventDate.plus({ days: comparisonOffsetDays }) : null,
-        getRegistrationStartDate(comparison2Entries, 10),
+        comparison2RegistrationStartDate,
         true,
         0
       )
@@ -1018,14 +1024,14 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
   const donationPrimarySeries = buildDonationSeries(
     primaryDonations,
     primaryEventDate,
-    null,
+    registrationStartDate,
     projectionEnabled
   );
   const donationComparisonSeries = comparisonGroup
     ? buildDonationSeries(
         comparisonDonations,
         comparisonEventDate ? comparisonEventDate.plus({ days: comparisonOffsetDays }) : null,
-        null,
+        comparisonRegistrationStartDate,
         true
       )
     : null;
@@ -1033,7 +1039,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     ? buildDonationSeries(
         comparison2Donations,
         comparison2EventDate ? comparison2EventDate.plus({ days: comparisonOffsetDays }) : null,
-        null,
+        comparison2RegistrationStartDate,
         true
       )
     : null;
@@ -1056,7 +1062,12 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
       const data = groupDataById.get(group.id);
       if (!data) return null;
       const eventDate = getLatestEventDate(data.events);
-      const series = buildDonationSeries(data.donations, eventDate, null, true);
+      const series = buildDonationSeries(
+        data.donations,
+        eventDate,
+        getRegistrationStartDate(data.entries, 10),
+        true
+      );
       return {
         series: series.series,
         weight: projectionWeights[index] ?? 0

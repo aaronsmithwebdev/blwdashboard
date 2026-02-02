@@ -19,7 +19,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable}`}>
+    <html
+      lang="en"
+      className={`${display.variable} ${display.className} ${sans.variable} ${sans.className}`}
+    >
       <body className="min-h-screen">
         <div className="grid min-h-screen md:grid-cols-[260px_1fr]">
           <Sidebar />
