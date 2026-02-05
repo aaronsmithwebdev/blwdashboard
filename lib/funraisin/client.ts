@@ -2,6 +2,7 @@ import "server-only";
 import {
   FunraisinDonationsResponse,
   FunraisinEventsResponse,
+  FunraisinParticipantsResponse,
   FunraisinParticipantEventsResponse,
   FunraisinTransactionsResponse
 } from "./types";
@@ -110,6 +111,20 @@ export function createFunraisinClient(options: FunraisinClientOptions = {}) {
     }) {
       const participantsPath = hasApiSuffix ? "participantsevents" : "api/participantsevents";
       return get<FunraisinParticipantEventsResponse>(participantsPath, {
+        date_from: params.fromDate,
+        date_to: params.toDate,
+        limit: params.limit,
+        offset: params.offset
+      });
+    },
+    async fetchParticipants(params: {
+      fromDate: string;
+      toDate: string;
+      limit: number;
+      offset: number;
+    }) {
+      const participantsPath = hasApiSuffix ? "participants" : "api/participants";
+      return get<FunraisinParticipantsResponse>(participantsPath, {
         date_from: params.fromDate,
         date_to: params.toDate,
         limit: params.limit,

@@ -17,6 +17,11 @@ const reports = [
     title: "Entries Debug",
     description: "Debug paid entry counts for events in a selected year.",
     href: "/reports/entries"
+  },
+  {
+    title: "Retention",
+    description: "Repeat participation and fundraising trends for recent years.",
+    href: "/reports/retention"
   }
 ];
 

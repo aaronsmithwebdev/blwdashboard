@@ -17,6 +17,13 @@ type SyncResponse = {
   errors: string[];
 };
 
+type CsvImportResponse = {
+  rowsParsed: number;
+  rowsUpserted: number;
+  rowsSkipped: number;
+  errors: string[];
+};
+
 export function SyncForm() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -35,6 +42,27 @@ export function SyncForm() {
   );
   const [entriesResult, setEntriesResult] = useState<SyncResponse | null>(null);
   const [entriesError, setEntriesError] = useState<string | null>(null);
+  const [entriesCsvFile, setEntriesCsvFile] = useState<File | null>(null);
+  const [entriesCsvStatus, setEntriesCsvStatus] = useState<
+    "idle" | "running" | "success" | "error"
+  >("idle");
+  const [entriesCsvResult, setEntriesCsvResult] = useState<CsvImportResponse | null>(null);
+  const [entriesCsvError, setEntriesCsvError] = useState<string | null>(null);
+  const [participantsFromDate, setParticipantsFromDate] = useState("");
+  const [participantsToDate, setParticipantsToDate] = useState("");
+  const [participantsStatus, setParticipantsStatus] = useState<
+    "idle" | "running" | "success" | "error"
+  >("idle");
+  const [participantsResult, setParticipantsResult] = useState<SyncResponse | null>(null);
+  const [participantsError, setParticipantsError] = useState<string | null>(null);
+  const [participantsCsvFile, setParticipantsCsvFile] = useState<File | null>(null);
+  const [participantsCsvStatus, setParticipantsCsvStatus] = useState<
+    "idle" | "running" | "success" | "error"
+  >("idle");
+  const [participantsCsvResult, setParticipantsCsvResult] = useState<CsvImportResponse | null>(
+    null
+  );
+  const [participantsCsvError, setParticipantsCsvError] = useState<string | null>(null);
   const [donationsFromDate, setDonationsFromDate] = useState("");
   const [donationsToDate, setDonationsToDate] = useState("");
   const [donationsStatus, setDonationsStatus] = useState<"idle" | "running" | "success" | "error">(
@@ -206,6 +234,150 @@ export function SyncForm() {
     } catch (err) {
       setEntriesStatus("error");
       setEntriesError(err instanceof Error ? err.message : "Event entry sync failed.");
+    }
+  };
+
+  const handleEntriesCsvImport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setEntriesCsvError(null);
+
+    if (!entriesCsvFile) {
+      setEntriesCsvError("CSV file is required.");
+      setEntriesCsvStatus("error");
+      return;
+    }
+
+    setEntriesCsvStatus("running");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", entriesCsvFile);
+
+      const response = await fetch("/api/import/event-entries", {
+        method: "POST",
+        body: formData
+      });
+
+      const rawText = await response.text();
+      let payload: (CsvImportResponse & { error?: string }) | null = null;
+      try {
+        payload = rawText ? (JSON.parse(rawText) as CsvImportResponse & { error?: string }) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error || payload?.errors?.[0] || rawText || "CSV import failed.";
+        throw new Error(message);
+      }
+
+      if (!payload) {
+        throw new Error("CSV import failed: empty response.");
+      }
+
+      setEntriesCsvResult(payload);
+      setEntriesCsvStatus("success");
+      setRefreshKey((current) => current + 1);
+    } catch (err) {
+      setEntriesCsvStatus("error");
+      setEntriesCsvError(err instanceof Error ? err.message : "CSV import failed.");
+    }
+  };
+
+  const handleParticipantsSync = async () => {
+    setParticipantsError(null);
+
+    if (!participantsFromDate || !participantsToDate) {
+      setParticipantsError("From and To dates are required.");
+      setParticipantsStatus("error");
+      return;
+    }
+
+    setParticipantsStatus("running");
+
+    try {
+      const response = await fetch("/api/sync/participants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fromDate: participantsFromDate,
+          toDate: participantsToDate
+        })
+      });
+
+      const rawText = await response.text();
+      let payload: (SyncResponse & { error?: string }) | null = null;
+      try {
+        payload = rawText ? (JSON.parse(rawText) as SyncResponse & { error?: string }) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error || payload?.errors?.[0] || rawText || "Participant sync failed.";
+        throw new Error(message);
+      }
+
+      if (!payload) {
+        throw new Error("Participant sync failed: empty response.");
+      }
+
+      setParticipantsResult(payload);
+      setParticipantsStatus("success");
+      setRefreshKey((current) => current + 1);
+    } catch (err) {
+      setParticipantsStatus("error");
+      setParticipantsError(err instanceof Error ? err.message : "Participant sync failed.");
+    }
+  };
+
+  const handleParticipantsCsvImport = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setParticipantsCsvError(null);
+
+    if (!participantsCsvFile) {
+      setParticipantsCsvError("CSV file is required.");
+      setParticipantsCsvStatus("error");
+      return;
+    }
+
+    setParticipantsCsvStatus("running");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", participantsCsvFile);
+
+      const response = await fetch("/api/import/participants", {
+        method: "POST",
+        body: formData
+      });
+
+      const rawText = await response.text();
+      let payload: (CsvImportResponse & { error?: string }) | null = null;
+      try {
+        payload = rawText ? (JSON.parse(rawText) as CsvImportResponse & { error?: string }) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error || payload?.errors?.[0] || rawText || "CSV import failed.";
+        throw new Error(message);
+      }
+
+      if (!payload) {
+        throw new Error("CSV import failed: empty response.");
+      }
+
+      setParticipantsCsvResult(payload);
+      setParticipantsCsvStatus("success");
+      setRefreshKey((current) => current + 1);
+    } catch (err) {
+      setParticipantsCsvStatus("error");
+      setParticipantsCsvError(err instanceof Error ? err.message : "CSV import failed.");
     }
   };
 
@@ -466,6 +638,230 @@ export function SyncForm() {
               {entriesResult.errors?.length ? (
                 <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                   {entriesResult.errors.join(" | ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Import Event Entries (CSV)</CardTitle>
+          <CardDescription>
+            Upsert event_entries rows by history_id using a CSV header that matches column names.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isProtected ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+              Please sign in to run an import. This page is protected in production.
+            </div>
+          ) : (
+            <form onSubmit={handleEntriesCsvImport} className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="entriesCsvFile">CSV file</Label>
+                <Input
+                  id="entriesCsvFile"
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setEntriesCsvFile(file);
+                    setEntriesCsvStatus("idle");
+                    setEntriesCsvResult(null);
+                    setEntriesCsvError(null);
+                  }}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required column: history_id. Other headers should match event_entries column names.
+                </p>
+              </div>
+              <div className="md:col-span-2 flex items-center gap-3">
+                <Button type="submit" disabled={entriesCsvStatus === "running"}>
+                  {entriesCsvStatus === "running" ? "Importing..." : "Import CSV"}
+                </Button>
+                {entriesCsvStatus === "success" && entriesCsvResult ? (
+                  <p className="text-sm text-muted-foreground">
+                    Upserted {entriesCsvResult.rowsUpserted} of {entriesCsvResult.rowsParsed} rows.
+                  </p>
+                ) : null}
+              </div>
+              {entriesCsvError ? (
+                <p className="md:col-span-2 text-sm text-red-600">{entriesCsvError}</p>
+              ) : null}
+            </form>
+          )}
+
+          {entriesCsvResult ? (
+            <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows parsed</p>
+                <p className="text-lg font-semibold">{entriesCsvResult.rowsParsed}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows upserted</p>
+                <p className="text-lg font-semibold">{entriesCsvResult.rowsUpserted}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows skipped</p>
+                <p className="text-lg font-semibold">{entriesCsvResult.rowsSkipped}</p>
+              </div>
+              {entriesCsvResult.errors?.length ? (
+                <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {entriesCsvResult.errors.join(" | ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Sync Participants</CardTitle>
+          <CardDescription>
+            Pull participant profile fields (DOB, postcode, gender) into the participants table.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isProtected ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+              Please sign in to run a sync. This page is protected in production.
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="participantsFromDate">From date</Label>
+                <Input
+                  id="participantsFromDate"
+                  type="date"
+                  value={participantsFromDate}
+                  onChange={(event) => setParticipantsFromDate(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="participantsToDate">To date</Label>
+                <Input
+                  id="participantsToDate"
+                  type="date"
+                  value={participantsToDate}
+                  onChange={(event) => setParticipantsToDate(event.target.value)}
+                  required
+                />
+              </div>
+              <div className="md:col-span-2 flex items-center gap-3">
+                <Button
+                  type="button"
+                  onClick={handleParticipantsSync}
+                  disabled={participantsStatus === "running"}
+                >
+                  {participantsStatus === "running" ? "Syncing Participants..." : "Sync Participants"}
+                </Button>
+                {participantsStatus === "success" && participantsResult ? (
+                  <p className="text-sm text-muted-foreground">
+                    Synced {participantsResult.rowsUpserted} rows across {participantsResult.pagesFetched} pages.
+                  </p>
+                ) : null}
+              </div>
+              {participantsError ? (
+                <p className="md:col-span-2 text-sm text-red-600">{participantsError}</p>
+              ) : null}
+            </div>
+          )}
+
+          {participantsResult ? (
+            <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Pages fetched</p>
+                <p className="text-lg font-semibold">{participantsResult.pagesFetched}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows upserted</p>
+                <p className="text-lg font-semibold">{participantsResult.rowsUpserted}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Errors</p>
+                <p className="text-lg font-semibold">{participantsResult.errors?.length ?? 0}</p>
+              </div>
+              {participantsResult.errors?.length ? (
+                <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {participantsResult.errors.join(" | ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Import Participants (CSV)</CardTitle>
+          <CardDescription>
+            Upsert participants by member_id using a CSV header that matches column names.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isProtected ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+              Please sign in to run an import. This page is protected in production.
+            </div>
+          ) : (
+            <form onSubmit={handleParticipantsCsvImport} className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="participantsCsvFile">CSV file</Label>
+                <Input
+                  id="participantsCsvFile"
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    setParticipantsCsvFile(file);
+                    setParticipantsCsvStatus("idle");
+                    setParticipantsCsvResult(null);
+                    setParticipantsCsvError(null);
+                  }}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required column: member_id. Other headers should match participants column names.
+                </p>
+              </div>
+              <div className="md:col-span-2 flex items-center gap-3">
+                <Button type="submit" disabled={participantsCsvStatus === "running"}>
+                  {participantsCsvStatus === "running" ? "Importing..." : "Import CSV"}
+                </Button>
+                {participantsCsvStatus === "success" && participantsCsvResult ? (
+                  <p className="text-sm text-muted-foreground">
+                    Upserted {participantsCsvResult.rowsUpserted} of {participantsCsvResult.rowsParsed} rows.
+                  </p>
+                ) : null}
+              </div>
+              {participantsCsvError ? (
+                <p className="md:col-span-2 text-sm text-red-600">{participantsCsvError}</p>
+              ) : null}
+            </form>
+          )}
+
+          {participantsCsvResult ? (
+            <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows parsed</p>
+                <p className="text-lg font-semibold">{participantsCsvResult.rowsParsed}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows upserted</p>
+                <p className="text-lg font-semibold">{participantsCsvResult.rowsUpserted}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows skipped</p>
+                <p className="text-lg font-semibold">{participantsCsvResult.rowsSkipped}</p>
+              </div>
+              {participantsCsvResult.errors?.length ? (
+                <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {participantsCsvResult.errors.join(" | ")}
                 </div>
               ) : null}
             </div>

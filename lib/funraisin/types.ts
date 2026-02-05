@@ -60,6 +60,7 @@ export type FunraisinParticipantEvent = {
   history_id?: number | string;
   event_id?: number | string;
   member_id?: number | string;
+  team_id?: number | string;
   paid_member_id?: number | string;
   invited_member_id?: number | string;
   member_type?: string;
@@ -70,6 +71,7 @@ export type FunraisinParticipantEvent = {
   is_additional?: string | number | boolean;
   date_paid?: string;
   date_completed?: string;
+  total_raised?: number | string;
   total_paid_entry?: number | string;
   total_paid?: number | string;
   po_number?: string;
@@ -85,6 +87,22 @@ export type FunraisinParticipantEventsResponse = {
   participantsevents?: FunraisinParticipantEvent[];
   data?: FunraisinParticipantEvent[];
   result?: FunraisinParticipantEvent[];
+};
+
+export type FunraisinParticipant = {
+  member_id?: number | string;
+  m_dob?: string;
+  m_address_pcode?: string | number;
+  m_gender?: string;
+  date_created?: string;
+  last_updated?: string;
+  [key: string]: unknown;
+};
+
+export type FunraisinParticipantsResponse = {
+  participants?: FunraisinParticipant[];
+  data?: FunraisinParticipant[];
+  result?: FunraisinParticipant[];
 };
 
 export type FunraisinDonation = {
