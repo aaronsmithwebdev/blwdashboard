@@ -206,7 +206,8 @@ function getRegistrationStartDate(
   const countByWeek = new Map<string, { weekEnding: DateTime; count: number }>();
   paidDates.forEach((date) => {
     const weekEnding = getWeekEndingFriday(date);
-    const key = weekEnding.toISODate() ?? weekEnding.toISO();
+    const key =
+      weekEnding.toISODate() ?? weekEnding.toISO() ?? weekEnding.toMillis().toString();
     const entry = countByWeek.get(key);
     if (entry) {
       entry.count += 1;
