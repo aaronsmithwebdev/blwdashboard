@@ -303,7 +303,7 @@ export default async function RetentionReportPage({
       <div>
         <h1 className="text-3xl font-semibold">Retention</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          National repeat participation using previous_entrant (yes/no) for the last three Sydney
+          National repeat participation using previous_entrant (yes/no) for the last three
           years ({yearOptions.join(", ")}). Event splits use your event groups.
         </p>
       </div>
