@@ -63,6 +63,16 @@ export function SyncForm() {
     null
   );
   const [participantsCsvError, setParticipantsCsvError] = useState<string | null>(null);
+  const [retentionStatus, setRetentionStatus] = useState<"idle" | "running" | "success" | "error">(
+    "idle"
+  );
+  const [retentionResult, setRetentionResult] = useState<SyncResponse | null>(null);
+  const [retentionError, setRetentionError] = useState<string | null>(null);
+  const currentYear = new Date().getFullYear();
+  const retentionYears = [currentYear - 3, currentYear - 2, currentYear - 1];
+  const [retentionYear, setRetentionYear] = useState<string>(
+    String(currentYear - 1)
+  );
   const [donationsFromDate, setDonationsFromDate] = useState("");
   const [donationsToDate, setDonationsToDate] = useState("");
   const [donationsStatus, setDonationsStatus] = useState<"idle" | "running" | "success" | "error">(
@@ -379,6 +389,48 @@ export function SyncForm() {
       setParticipantsCsvStatus("error");
       setParticipantsCsvError(err instanceof Error ? err.message : "CSV import failed.");
     }
+  };
+
+  const handleRetentionRefresh = async () => {
+    setRetentionError(null);
+    setRetentionStatus("running");
+
+    try {
+      const payloadBody =
+        retentionYear === "all"
+          ? {}
+          : { year: Number.parseInt(retentionYear, 10) };
+      const response = await fetch("/api/sync/retention-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadBody)
+      });
+
+      const rawText = await response.text();
+      let payload: (SyncResponse & { error?: string }) | null = null;
+      try {
+        payload = rawText ? (JSON.parse(rawText) as SyncResponse & { error?: string }) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error || payload?.errors?.[0] || rawText || "Retention refresh failed.";
+        throw new Error(message);
+      }
+
+      if (!payload) {
+        throw new Error("Retention refresh failed: empty response.");
+      }
+
+      setRetentionResult(payload);
+      setRetentionStatus("success");
+      setRefreshKey((current) => current + 1);
+      } catch (err) {
+        setRetentionStatus("error");
+        setRetentionError(err instanceof Error ? err.message : "Retention refresh failed.");
+      }
   };
 
   const handleDonationsSync = async () => {
@@ -862,6 +914,69 @@ export function SyncForm() {
               {participantsCsvResult.errors?.length ? (
                 <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                   {participantsCsvResult.errors.join(" | ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Refresh Retention Cache</CardTitle>
+          <CardDescription>
+            Rebuild the cached retention summary used by the Retention report.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isProtected ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+              Please sign in to run a refresh. This page is protected in production.
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="retentionYear">Year to refresh</Label>
+                <select
+                  id="retentionYear"
+                  value={retentionYear}
+                  onChange={(event) => setRetentionYear(event.target.value)}
+                  className="h-10 min-w-[180px] rounded-md border border-input bg-background/70 px-3 text-sm"
+                >
+                  <option value="all">All (last three years)</option>
+                  {retentionYears.map((year) => (
+                    <option key={year} value={String(year)}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button type="button" onClick={handleRetentionRefresh} disabled={retentionStatus === "running"}>
+                {retentionStatus === "running" ? "Refreshing..." : "Refresh Retention Cache"}
+              </Button>
+              {retentionStatus === "success" && retentionResult ? (
+                <p className="text-sm text-muted-foreground">Retention cache refreshed.</p>
+              ) : null}
+            </div>
+          )}
+          {retentionError ? <p className="mt-3 text-sm text-red-600">{retentionError}</p> : null}
+          {retentionResult ? (
+            <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Pages fetched</p>
+                <p className="text-lg font-semibold">{retentionResult.pagesFetched}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows upserted</p>
+                <p className="text-lg font-semibold">{retentionResult.rowsUpserted}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Errors</p>
+                <p className="text-lg font-semibold">{retentionResult.errors?.length ?? 0}</p>
+              </div>
+              {retentionResult.errors?.length ? (
+                <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {retentionResult.errors.join(" | ")}
                 </div>
               ) : null}
             </div>
