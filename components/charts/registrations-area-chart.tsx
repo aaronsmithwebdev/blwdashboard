@@ -116,7 +116,7 @@ export function RegistrationsAreaChart({
             content={({ active, payload, label }) => {
               if (!active || !payload || payload.length === 0) return null;
               const chartPoint = payload[0]?.payload as ChartDatum | undefined;
-              const displayLabel = chartPoint?.weekLabel ?? label;
+              const displayLabel = chartPoint?.weekLabel ?? (label !== undefined ? String(label) : "");
               return (
                 <div className="rounded-lg border border-border/60 bg-white/95 p-3 text-xs shadow-lg">
                   <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -172,7 +172,6 @@ export function RegistrationsAreaChart({
               fill={markerColor(marker.series)}
               stroke="hsl(var(--background))"
               strokeWidth={2}
-              isFront
             />
           )) ?? null}
           {compareLabel ? (

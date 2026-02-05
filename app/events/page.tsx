@@ -1080,7 +1080,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         weight: projectionWeights[index] ?? 0
       } satisfies WeightedComparisonSeries;
     })
-    .filter((value): value is WeightedComparisonSeries => Boolean(value) && value.weight > 0);
+    .filter(isWeightedComparisonSeries);
   const donationProjectionDate = projectionEnabled
     ? parseProjectionDate(projectionDateParam, selectedGroup.year)
     : null;
