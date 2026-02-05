@@ -88,6 +88,12 @@ type WeightedComparisonSeries = {
   weight: number;
 };
 
+function isWeightedComparisonSeries(
+  value: WeightedComparisonSeries | null
+): value is WeightedComparisonSeries {
+  return value !== null && value.weight > 0;
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-AU", {
     style: "currency",
@@ -820,7 +826,7 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         weight: projectionWeights[index] ?? 0
       } satisfies WeightedComparisonSeries;
     })
-    .filter((value): value is WeightedComparisonSeries => Boolean(value) && value.weight > 0);
+    .filter(isWeightedComparisonSeries);
 
   const validWeekIndexes = new Set(primarySeries.series.map((point) => point.weekIndex));
   const primaryMarkerMap = buildDiscountMarkers(
