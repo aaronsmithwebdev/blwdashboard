@@ -953,8 +953,8 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         ? point.primary ?? 0
         : baselineAtProjection * projectionScaleTotal);
     const rampProgress =
-      point.weeksBeforeEvent >= projectionWeeksBeforeEvent - projectionRampWeeks
-        ? (projectionWeeksBeforeEvent - point.weeksBeforeEvent) / projectionRampWeeks
+      point.weekIndex >= projectionWeeksBeforeEvent - projectionRampWeeks
+        ? (projectionWeeksBeforeEvent - point.weekIndex) / projectionRampWeeks
         : 1;
     const ramp = Math.min(Math.max(rampProgress, 0), 1);
     const blendedProjection =
@@ -1176,8 +1176,8 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
         ? point.primary ?? 0
         : donationBaselineAtProjection * donationScaleTotal);
     const rampProgress =
-      point.weeksBeforeEvent >= donationProjectionWeeksBeforeEvent - donationProjectionRampWeeks
-        ? (donationProjectionWeeksBeforeEvent - point.weeksBeforeEvent) / donationProjectionRampWeeks
+      point.weekIndex >= donationProjectionWeeksBeforeEvent - donationProjectionRampWeeks
+        ? (donationProjectionWeeksBeforeEvent - point.weekIndex) / donationProjectionRampWeeks
         : 1;
     const ramp = Math.min(Math.max(rampProgress, 0), 1);
     const blendedProjection =
