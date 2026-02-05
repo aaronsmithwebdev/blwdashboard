@@ -68,6 +68,10 @@ function mapEvent(event: FunraisinEvent) {
   };
 }
 
+function isNotNull<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
+}
+
 function pickFields<T extends Record<string, unknown>>(row: T, allowed: string[]) {
   const picked: Record<string, unknown> = {};
   for (const key of allowed) {
@@ -109,7 +113,7 @@ export async function POST() {
 
       pagesFetched += 1;
 
-      const mapped = events.map(mapEvent).filter(Boolean) as ReturnType<typeof mapEvent>[];
+      const mapped = events.map(mapEvent).filter(isNotNull);
       const skipped = events.length - mapped.length;
       if (skipped > 0) {
         errors.push(`Skipped ${skipped} events without event_id.`);
