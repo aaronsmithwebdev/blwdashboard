@@ -45,12 +45,66 @@ type EventEntry = {
 
 type EventRow = {
   groupId: string;
+  discountKey: string;
   discountName: string;
   entrants: number;
   revenue: number;
   startsAt: string | null;
   endsAt: string | null;
 };
+
+type DiscountLabelMeta = {
+  key: string;
+  label: string;
+  order: number;
+};
+
+const DISCOUNT_LABEL_BUCKETS = [
+  {
+    key: "tier_1",
+    label: "Bloody Great Price",
+    order: 1,
+    aliases: ["Bloody Great Price"]
+  },
+  {
+    key: "tier_2",
+    label: "Bloody Good Deal",
+    order: 2,
+    aliases: ["Super Early Bird", "Bloody Good Deal"]
+  },
+  {
+    key: "tier_3",
+    label: "Bloody Solid Saving",
+    order: 3,
+    aliases: ["Early Bird", "Bloody Solid Saving"]
+  },
+  {
+    key: "tier_4",
+    label: "Bloody Last Chance",
+    order: 4,
+    aliases: ["Regular Price", "Bloody Last Chance"]
+  }
+] as const;
+
+function normalizeDiscountLabel(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function resolveDiscountLabelMeta(label: string): DiscountLabelMeta {
+  const normalized = normalizeDiscountLabel(label);
+  const bucket = DISCOUNT_LABEL_BUCKETS.find((entry) =>
+    entry.aliases.some((alias) => normalizeDiscountLabel(alias) === normalized)
+  );
+  if (bucket) {
+    return { key: bucket.key, label: bucket.label, order: bucket.order };
+  }
+  const fallbackLabel = label.trim() || "Discount";
+  return {
+    key: `custom:${normalized || fallbackLabel.toLowerCase()}`,
+    label: fallbackLabel,
+    order: 100
+  };
+}
 
 function toSydneyDate(value?: string | null) {
   if (!value) return null;
@@ -245,9 +299,11 @@ export default async function DiscountReportPage({
     tiers.forEach((tier) => {
       const key = `${group.id}:${tier.id}`;
       if (rowMap.has(key)) return;
+      const labelMeta = resolveDiscountLabelMeta(tier.label);
       rowMap.set(key, {
         groupId: group.id,
-        discountName: tier.label,
+        discountKey: labelMeta.key,
+        discountName: labelMeta.label,
         entrants: 0,
         revenue: 0,
         startsAt: tier.starts_at,
@@ -272,9 +328,11 @@ export default async function DiscountReportPage({
         if (paidDate < tier.starts_at || paidDate > tier.ends_at) return;
 
         const key = `${groupId}:${tier.id}`;
+        const labelMeta = resolveDiscountLabelMeta(tier.label);
         const row = rowMap.get(key) ?? {
           groupId,
-          discountName: tier.label,
+          discountKey: labelMeta.key,
+          discountName: labelMeta.label,
           entrants: 0,
           revenue: 0,
           startsAt: tier.starts_at,
@@ -294,20 +352,25 @@ export default async function DiscountReportPage({
     totalRevenueByGroup.set(row.groupId, (totalRevenueByGroup.get(row.groupId) ?? 0) + row.revenue);
   });
 
-  const rowsByGroupAndLabel = new Map<string, Map<string, EventRow>>();
+  const rowsByGroupAndKey = new Map<string, Map<string, EventRow>>();
   rowMap.forEach((row) => {
-    if (!rowsByGroupAndLabel.has(row.groupId)) {
-      rowsByGroupAndLabel.set(row.groupId, new Map());
+    if (!rowsByGroupAndKey.has(row.groupId)) {
+      rowsByGroupAndKey.set(row.groupId, new Map());
     }
-    rowsByGroupAndLabel.get(row.groupId)?.set(row.discountName, row);
+    const byKey = rowsByGroupAndKey.get(row.groupId);
+    if (!byKey) return;
+    const existing = byKey.get(row.discountKey);
+    if (!existing) {
+      byKey.set(row.discountKey, { ...row });
+      return;
+    }
+    existing.entrants += row.entrants;
+    existing.revenue += row.revenue;
+    existing.startsAt =
+      [existing.startsAt, row.startsAt].filter(Boolean).sort()[0] ?? null;
+    existing.endsAt =
+      [existing.endsAt, row.endsAt].filter(Boolean).sort().reverse()[0] ?? null;
   });
-
-  const preferredOrder = [
-    "Bloody Great Price",
-    "Super Early Bird",
-    "Early Bird",
-    "Regular Price"
-  ];
 
   const groupsByCity = new Map<string, EventGroup[]>();
   groupsForYears.forEach((group) => {
@@ -328,21 +391,22 @@ export default async function DiscountReportPage({
         if (!Number.isFinite(yearValue)) return;
         groupByYear.set(yearValue, group);
       });
-      const labelSet = new Set<string>();
+      const labelByKey = new Map<string, DiscountLabelMeta>();
       groupsWithTiers.forEach((group) => {
-        (tiersByGroup.get(group.id) ?? []).forEach((tier) => labelSet.add(tier.label));
+        (tiersByGroup.get(group.id) ?? []).forEach((tier) => {
+          const labelMeta = resolveDiscountLabelMeta(tier.label);
+          if (!labelByKey.has(labelMeta.key)) {
+            labelByKey.set(labelMeta.key, labelMeta);
+          }
+        });
       });
-      const labels = Array.from(labelSet).sort((a, b) => {
-        const aIndex = preferredOrder.indexOf(a);
-        const bIndex = preferredOrder.indexOf(b);
-        if (aIndex === -1 && bIndex === -1) return a.localeCompare(b);
-        if (aIndex === -1) return 1;
-        if (bIndex === -1) return -1;
-        return aIndex - bIndex;
+      const labels = Array.from(labelByKey.values()).sort((a, b) => {
+        if (a.order === b.order) return a.label.localeCompare(b.label);
+        return a.order - b.order;
       });
       return { city, groupByYear, labels };
     })
-    .filter((section): section is { city: string; groupByYear: Map<number, EventGroup>; labels: string[] } =>
+    .filter((section): section is { city: string; groupByYear: Map<number, EventGroup>; labels: DiscountLabelMeta[] } =>
       Boolean(section)
     )
     .sort((a, b) => a.city.localeCompare(b.city));
@@ -472,45 +536,45 @@ export default async function DiscountReportPage({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {section.labels.map((label) => (
-                      <TableRow key={`${section.city}-${label}`}>
+                    {section.labels.map((labelMeta) => (
+                      <TableRow key={`${section.city}-${labelMeta.key}`}>
                         <TableCell>
-                          <div className="text-sm font-medium">{label}</div>
+                          <div className="text-sm font-medium">{labelMeta.label}</div>
                         </TableCell>
                         {selectedYearsSorted.map((year) => {
                           const group = section.groupByYear.get(year);
                           if (!group) {
                             return [
-                              <TableCell key={`${year}-${label}-entrants`} className="text-right">
+                              <TableCell key={`${year}-${labelMeta.key}-entrants`} className="text-right">
                                 —
                               </TableCell>,
-                              <TableCell key={`${year}-${label}-percent`} className="text-right">
+                              <TableCell key={`${year}-${labelMeta.key}-percent`} className="text-right">
                                 —
                               </TableCell>,
-                              <TableCell key={`${year}-${label}-revenue`} className="text-right">
+                              <TableCell key={`${year}-${labelMeta.key}-revenue`} className="text-right">
                                 —
                               </TableCell>,
-                              <TableCell key={`${year}-${label}-revenue-ex`} className="text-right">
+                              <TableCell key={`${year}-${labelMeta.key}-revenue-ex`} className="text-right">
                                 —
                               </TableCell>
                             ];
                           }
-                          const row = rowsByGroupAndLabel.get(group.id)?.get(label);
+                          const row = rowsByGroupAndKey.get(group.id)?.get(labelMeta.key);
                           const entrants = row?.entrants ?? 0;
                           const revenue = row?.revenue ?? 0;
                           const totalEntrants = totalEntrantsByGroup.get(group.id) ?? 0;
                           const percent = totalEntrants ? (entrants / totalEntrants) * 100 : 0;
                           return [
-                            <TableCell key={`${year}-${label}-entrants`} className="text-right">
+                            <TableCell key={`${year}-${labelMeta.key}-entrants`} className="text-right">
                               {entrants}
                             </TableCell>,
-                            <TableCell key={`${year}-${label}-percent`} className="text-right">
+                            <TableCell key={`${year}-${labelMeta.key}-percent`} className="text-right">
                               {formatPercent(percent)}
                             </TableCell>,
-                            <TableCell key={`${year}-${label}-revenue`} className="text-right">
+                            <TableCell key={`${year}-${labelMeta.key}-revenue`} className="text-right">
                               {formatCurrency(revenue)}
                             </TableCell>,
-                            <TableCell key={`${year}-${label}-revenue-ex`} className="text-right">
+                            <TableCell key={`${year}-${labelMeta.key}-revenue-ex`} className="text-right">
                               {formatCurrency(revenue / 1.1)}
                             </TableCell>
                           ];
