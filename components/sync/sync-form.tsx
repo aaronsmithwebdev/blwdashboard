@@ -17,6 +17,21 @@ type SyncResponse = {
   errors: string[];
 };
 
+type FullSyncRun = {
+  endpoint: string;
+  ok: boolean;
+  status: number;
+  pagesFetched: number;
+  rowsUpserted: number;
+  errors: string[];
+};
+
+type FullSyncResponse = SyncResponse & {
+  fromDate: string;
+  toDate: string;
+  runs: FullSyncRun[];
+};
+
 type CsvImportResponse = {
   rowsParsed: number;
   rowsUpserted: number;
@@ -80,6 +95,11 @@ export function SyncForm() {
   );
   const [donationsResult, setDonationsResult] = useState<SyncResponse | null>(null);
   const [donationsError, setDonationsError] = useState<string | null>(null);
+  const [fullSyncStatus, setFullSyncStatus] = useState<"idle" | "running" | "success" | "error">(
+    "idle"
+  );
+  const [fullSyncResult, setFullSyncResult] = useState<FullSyncResponse | null>(null);
+  const [fullSyncError, setFullSyncError] = useState<string | null>(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [isAuthed, setIsAuthed] = useState(false);
 
@@ -101,6 +121,44 @@ export function SyncForm() {
 
   const requireAuth = process.env.NODE_ENV === "production";
   const isProtected = requireAuth && authChecked && !isAuthed;
+
+  const handleFullSync = async () => {
+    setFullSyncError(null);
+    setFullSyncStatus("running");
+
+    try {
+      const response = await fetch("/api/sync/full", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+
+      const rawText = await response.text();
+      let payload: (FullSyncResponse & { error?: string }) | null = null;
+      try {
+        payload = rawText ? (JSON.parse(rawText) as FullSyncResponse & { error?: string }) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message =
+          payload?.error || payload?.errors?.[0] || rawText || "Full sync failed.";
+        throw new Error(message);
+      }
+
+      if (!payload) {
+        throw new Error("Full sync failed: empty response.");
+      }
+
+      setFullSyncResult(payload);
+      setFullSyncStatus("success");
+      setRefreshKey((current) => current + 1);
+    } catch (err) {
+      setFullSyncStatus("error");
+      setFullSyncError(err instanceof Error ? err.message : "Full sync failed.");
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -483,6 +541,75 @@ export function SyncForm() {
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>Full Incremental Sync</CardTitle>
+          <CardDescription>
+            Run events, transactions, event entries, participants, and donations from the last
+            successful full sync to now.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isProtected ? (
+            <div className="rounded-lg border border-dashed border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
+              Please sign in to run a sync. This page is protected in production.
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button type="button" onClick={handleFullSync} disabled={fullSyncStatus === "running"}>
+                {fullSyncStatus === "running" ? "Syncing Everything..." : "Sync Everything Now"}
+              </Button>
+              {fullSyncStatus === "success" && fullSyncResult ? (
+                <p className="text-sm text-muted-foreground">
+                  Synced {fullSyncResult.rowsUpserted} rows across {fullSyncResult.pagesFetched} pages
+                  ({fullSyncResult.fromDate} to {fullSyncResult.toDate}).
+                </p>
+              ) : null}
+            </div>
+          )}
+          {fullSyncError ? <p className="mt-3 text-sm text-red-600">{fullSyncError}</p> : null}
+
+          {fullSyncResult ? (
+            <div className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Pages fetched</p>
+                <p className="text-lg font-semibold">{fullSyncResult.pagesFetched}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Rows upserted</p>
+                <p className="text-lg font-semibold">{fullSyncResult.rowsUpserted}</p>
+              </div>
+              <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Errors</p>
+                <p className="text-lg font-semibold">{fullSyncResult.errors?.length ?? 0}</p>
+              </div>
+              <div className="md:col-span-3 rounded-lg border border-border/70 bg-muted/20 p-3">
+                <p className="text-xs uppercase text-muted-foreground">Endpoint status</p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                  {fullSyncResult.runs.map((run) => (
+                    <span
+                      key={run.endpoint}
+                      className={`rounded-md border px-2 py-1 ${
+                        run.ok
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                          : "border-red-200 bg-red-50 text-red-800"
+                      }`}
+                    >
+                      {run.endpoint}: {run.rowsUpserted} rows
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {fullSyncResult.errors?.length ? (
+                <div className="md:col-span-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                  {fullSyncResult.errors.join(" | ")}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Sync Funraisin Transactions</CardTitle>

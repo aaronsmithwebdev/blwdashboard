@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
+import { isValidCronBearerToken } from "@/lib/security/cron";
 
 const PUBLIC_PATHS = ["/login"];
 
@@ -15,6 +16,10 @@ function isStaticAsset(pathname: string) {
   );
 }
 
+function isSyncOrCronApiPath(pathname: string) {
+  return pathname.startsWith("/api/sync/") || pathname.startsWith("/api/cron/");
+}
+
 function withSupabaseCookies(source: NextResponse, destination: NextResponse) {
   source.cookies.getAll().forEach((cookie) => {
     destination.cookies.set(cookie);
@@ -27,6 +32,17 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (isStaticAsset(pathname)) {
+    return res;
+  }
+
+  if (pathname === "/api/cron/full-sync") {
+    return res;
+  }
+
+  if (
+    isSyncOrCronApiPath(pathname) &&
+    isValidCronBearerToken(req.headers.get("authorization"))
+  ) {
     return res;
   }
 

@@ -466,16 +466,18 @@ function buildMedianBaselineSeries(
 }
 
 function parseProjectionDate(value: string | null | undefined, targetYear: number) {
-  if (!value) return null;
+  const liveDate = DateTime.now().setZone(SYDNEY_ZONE).startOf("day").set({ year: targetYear });
+  if (!value) return liveDate.isValid ? liveDate : null;
   const trimmed = value.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return liveDate.isValid ? liveDate : null;
   const isoMatch = /^\d{4}-\d{2}-\d{2}$/.test(trimmed);
   const monthDayMatch = /^\d{2}-\d{2}$/.test(trimmed);
-  if (!isoMatch && !monthDayMatch) return null;
+  if (!isoMatch && !monthDayMatch) return liveDate.isValid ? liveDate : null;
   const isoDate = isoMatch ? trimmed : `${targetYear}-${trimmed}`;
   const parsed = DateTime.fromISO(isoDate, { zone: SYDNEY_ZONE });
-  if (!parsed.isValid) return null;
-  return parsed.set({ year: targetYear }).startOf("day");
+  if (!parsed.isValid) return liveDate.isValid ? liveDate : null;
+  const normalized = parsed.set({ year: targetYear }).startOf("day");
+  return normalized.isValid ? normalized : liveDate.isValid ? liveDate : null;
 }
 
 async function fetchGroupData(
