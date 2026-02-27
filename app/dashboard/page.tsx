@@ -1,8 +1,13 @@
 import Link from "next/link";
+import { DateTime } from "luxon";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { coerceBoolean } from "@/lib/utils/dates";
+
+const SYDNEY_ZONE = "Australia/Sydney";
+const PAGE_SIZE = 1000;
 
 type GroupSummary = {
   id: string;
@@ -18,6 +23,32 @@ type GroupSummary = {
   donationsPerAllEntrant: number | null;
 };
 
+type EventGroup = {
+  id: string;
+  event_category_id: string;
+  year: number;
+};
+
+type EventMapping = {
+  event_group_id: string;
+  event_id: number | string | null;
+  include_in_reporting: boolean | null;
+};
+
+type DonationRow = {
+  event_id: number | string | null;
+  d_amount: number | null;
+  d_refund_amount: number | null;
+  d_status: string | null;
+};
+
+type EventEntryRow = {
+  event_id: number | string | null;
+  is_paid: boolean | string | number | null;
+  is_archived: boolean | string | number | null;
+  total_paid_entry: number | null;
+};
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-AU", {
     style: "currency",
@@ -31,68 +62,52 @@ function formatRatio(amount: number, count: number) {
   return formatCurrency(amount / count);
 }
 
+function normalizeEventIdsForQuery(eventIds: string[]) {
+  return eventIds.map((value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : value;
+  });
+}
+
 export default async function DashboardPage() {
   const supabase = createSupabaseAdminClient();
+  const currentYear = DateTime.now().setZone(SYDNEY_ZONE).year;
 
-  const groupSummaryPromise = Promise.all([
+  const [categoriesResult, groupsResult] = await Promise.all([
     supabase.from("event_category").select("id, display_name"),
-    supabase.from("event_group").select("id, event_category_id, year"),
     supabase
-      .from("event_group_event")
-      .select("event_group_id, event_id, include_in_reporting"),
-    supabase.from("donations").select("event_id, d_amount, d_refund_amount, d_status"),
-    supabase
-      .from("event_entries")
-      .select("event_id, history_id, is_paid, is_archived, total_paid_entry")
+      .from("event_group")
+      .select("id, event_category_id, year")
+      .eq("year", currentYear)
   ]);
 
-  const [
-    categoriesResult,
-    groupsResult,
-    mappingsResult,
-    donationsResult,
-    entriesResult
-  ] = await groupSummaryPromise;
-
-  const summaryError =
-    categoriesResult.error ||
-    groupsResult.error ||
-    mappingsResult.error ||
-    donationsResult.error ||
-    entriesResult.error;
+  const baseError = categoriesResult.error || groupsResult.error;
+  if (baseError) {
+    return <p className="text-sm text-red-600">{baseError.message}</p>;
+  }
 
   const categories = (categoriesResult.data ?? []) as { id: string; display_name: string }[];
-  const groups = (groupsResult.data ?? []) as {
-    id: string;
-    event_category_id: string;
-    year: number;
-  }[];
-  const mappings = (mappingsResult.data ?? []) as {
-    event_group_id: string;
-    event_id: number | string;
-    include_in_reporting: boolean | null;
-  }[];
-  const donations = (donationsResult.data ?? []) as {
-    event_id: number | string | null;
-    d_amount: number | null;
-    d_refund_amount: number | null;
-    d_status: string | null;
-  }[];
-  const entries = (entriesResult.data ?? []) as {
-    event_id: number | string | null;
-    history_id: number;
-    is_paid: boolean | string | number | null;
-    is_archived: boolean | string | number | null;
-    total_paid_entry: number | null;
-  }[];
+  const groups = (groupsResult.data ?? []) as EventGroup[];
+  const groupIds = groups.map((group) => group.id);
 
+  const mappingsResult = groupIds.length
+    ? await supabase
+        .from("event_group_event")
+        .select("event_group_id, event_id, include_in_reporting")
+        .in("event_group_id", groupIds)
+    : { data: [] as EventMapping[], error: null };
+
+  if (mappingsResult.error) {
+    return <p className="text-sm text-red-600">{mappingsResult.error.message}</p>;
+  }
+
+  const mappings = (mappingsResult.data ?? []) as EventMapping[];
   const categoryById = new Map(categories.map((category) => [category.id, category.display_name]));
   const groupById = new Map<string, GroupSummary>();
   groups.forEach((group) => {
-    const categoryName = categoryById.get(group.event_category_id) ?? "Event";
     groupById.set(group.id, {
       id: group.id,
-      categoryName,
+      categoryName: categoryById.get(group.event_category_id) ?? "Event",
       year: group.year,
       mappedEvents: 0,
       paidEntrants: 0,
@@ -108,6 +123,7 @@ export default async function DashboardPage() {
   const eventToGroups = new Map<string, Set<string>>();
   mappings.forEach((mapping) => {
     if (mapping.include_in_reporting === false) return;
+    if (mapping.event_id === null || mapping.event_id === undefined) return;
     const groupId = mapping.event_group_id;
     if (!groupId) return;
     const eventKey = String(mapping.event_id);
@@ -117,21 +133,65 @@ export default async function DashboardPage() {
     eventToGroups.get(eventKey)?.add(groupId);
   });
 
-  eventToGroups.forEach((groupIds) => {
-    groupIds.forEach((groupId) => {
+  eventToGroups.forEach((groupIdsForEvent) => {
+    groupIdsForEvent.forEach((groupId) => {
       const group = groupById.get(groupId);
-      if (group) group.mappedEvents += 1;
+      if (group) {
+        group.mappedEvents += 1;
+      }
     });
   });
+
+  const eventIdsForQuery = normalizeEventIdsForQuery(Array.from(eventToGroups.keys()));
+  const entries: EventEntryRow[] = [];
+  const donations: DonationRow[] = [];
+
+  if (eventIdsForQuery.length > 0) {
+    let entriesOffset = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("event_entries")
+        .select("event_id, is_paid, is_archived, total_paid_entry")
+        .in("event_id", eventIdsForQuery)
+        .range(entriesOffset, entriesOffset + PAGE_SIZE - 1);
+
+      if (error) {
+        return <p className="text-sm text-red-600">{error.message}</p>;
+      }
+
+      const batch = (data ?? []) as EventEntryRow[];
+      entries.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      entriesOffset += PAGE_SIZE;
+    }
+
+    let donationsOffset = 0;
+    while (true) {
+      const { data, error } = await supabase
+        .from("donations")
+        .select("event_id, d_amount, d_refund_amount, d_status")
+        .in("event_id", eventIdsForQuery)
+        .range(donationsOffset, donationsOffset + PAGE_SIZE - 1);
+
+      if (error) {
+        return <p className="text-sm text-red-600">{error.message}</p>;
+      }
+
+      const batch = (data ?? []) as DonationRow[];
+      donations.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      donationsOffset += PAGE_SIZE;
+    }
+  }
 
   entries.forEach((entry) => {
     if (!entry.event_id) return;
     if (coerceBoolean(entry.is_archived) === true) return;
-    const groupIds = eventToGroups.get(String(entry.event_id));
-    if (!groupIds) return;
+    const mappedGroups = eventToGroups.get(String(entry.event_id));
+    if (!mappedGroups) return;
     const isPaid = coerceBoolean(entry.is_paid) === true;
     const revenueExGst = Number(entry.total_paid_entry ?? 0) / 1.1;
-    groupIds.forEach((groupId) => {
+    mappedGroups.forEach((groupId) => {
       const group = groupById.get(groupId);
       if (!group) return;
       group.allEntrants += 1;
@@ -145,14 +205,13 @@ export default async function DashboardPage() {
   donations.forEach((donation) => {
     if (!donation.event_id) return;
     if ((donation.d_status ?? "").toLowerCase() !== "paid") return;
-    const groupIds = eventToGroups.get(String(donation.event_id));
-    if (!groupIds) return;
-    const amount = Number(donation.d_amount ?? 0) - Number(donation.d_refund_amount ?? 0);
-    groupIds.forEach((groupId) => {
+    const mappedGroups = eventToGroups.get(String(donation.event_id));
+    if (!mappedGroups) return;
+    const netDonation = Number(donation.d_amount ?? 0) - Number(donation.d_refund_amount ?? 0);
+    mappedGroups.forEach((groupId) => {
       const group = groupById.get(groupId);
-      if (group) {
-        group.totalDonations += amount;
-      }
+      if (!group) return;
+      group.totalDonations += netDonation;
     });
   });
 
@@ -164,70 +223,45 @@ export default async function DashboardPage() {
       group.allEntrants > 0 ? group.totalDonations / group.allEntrants : null;
   });
 
-  let totalPaidEntrants = 0;
-  let totalAllEntrants = 0;
-  let totalEntryRevenueExGst = 0;
-  let totalDonations = 0;
+  const groupSummaries = Array.from(groupById.values()).sort((a, b) =>
+    a.categoryName.localeCompare(b.categoryName)
+  );
 
-  const includedEventIds = new Set(eventToGroups.keys());
-  entries.forEach((entry) => {
-    if (!entry.event_id) return;
-    if (!includedEventIds.has(String(entry.event_id))) return;
-    if (coerceBoolean(entry.is_archived) === true) return;
-    totalAllEntrants += 1;
-    if (coerceBoolean(entry.is_paid) === true) {
-      totalPaidEntrants += 1;
-      totalEntryRevenueExGst += Number(entry.total_paid_entry ?? 0) / 1.1;
-    }
-  });
-  donations.forEach((donation) => {
-    if (!donation.event_id) return;
-    if (!includedEventIds.has(String(donation.event_id))) return;
-    if ((donation.d_status ?? "").toLowerCase() !== "paid") return;
-    totalDonations += Number(donation.d_amount ?? 0) - Number(donation.d_refund_amount ?? 0);
-  });
-  const totalUnpaidEntrants = Math.max(totalAllEntrants - totalPaidEntrants, 0);
-
-  const groupSummaries = Array.from(groupById.values()).sort((a, b) => {
-    if (a.categoryName === b.categoryName) {
-      return b.year - a.year;
-    }
-    return a.categoryName.localeCompare(b.categoryName);
-  });
+  const totals = groupSummaries.reduce(
+    (acc, group) => {
+      acc.paidEntrants += group.paidEntrants;
+      acc.allEntrants += group.allEntrants;
+      acc.entryRevenueExGst += group.entryRevenueExGst;
+      acc.donations += group.totalDonations;
+      return acc;
+    },
+    { paidEntrants: 0, allEntrants: 0, entryRevenueExGst: 0, donations: 0 }
+  );
+  const totalUnpaidEntrants = Math.max(totals.allEntrants - totals.paidEntrants, 0);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold">Dashboard</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Live rollup of entrants, entry revenue, and donations.
+          Live rollup for {currentYear} groups: entrants, entry revenue, and donations.
         </p>
       </div>
-
-      {summaryError ? (
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-sm text-red-600">{summaryError.message}</p>
-          </CardContent>
-        </Card>
-      ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardHeader>
             <CardDescription>Paid Entrants</CardDescription>
-            <CardTitle className="text-2xl">{totalPaidEntrants.toLocaleString("en-AU")}</CardTitle>
+            <CardTitle className="text-2xl">{totals.paidEntrants.toLocaleString("en-AU")}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>All Entrants</CardDescription>
-            <CardTitle className="text-2xl">{totalAllEntrants.toLocaleString("en-AU")}</CardTitle>
+            <CardTitle className="text-2xl">{totals.allEntrants.toLocaleString("en-AU")}</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-muted-foreground">
-              Includes paid and non-paid entrants.
-            </p>
+            <p className="text-xs text-muted-foreground">Includes paid and non-paid entrants.</p>
           </CardContent>
         </Card>
         <Card>
@@ -239,23 +273,25 @@ export default async function DashboardPage() {
         <Card>
           <CardHeader>
             <CardDescription>Entry Revenue (ex GST)</CardDescription>
-            <CardTitle className="text-2xl">{formatCurrency(totalEntryRevenueExGst)}</CardTitle>
+            <CardTitle className="text-2xl">{formatCurrency(totals.entryRevenueExGst)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Donations</CardDescription>
-            <CardTitle className="text-2xl">{formatCurrency(totalDonations)}</CardTitle>
+            <CardTitle className="text-2xl">{formatCurrency(totals.donations)}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
           <CardHeader>
             <CardDescription>Donations Per Entrant</CardDescription>
-            <CardTitle className="text-2xl">{formatRatio(totalDonations, totalPaidEntrants)}</CardTitle>
+            <CardTitle className="text-2xl">
+              {formatRatio(totals.donations, totals.paidEntrants)}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-muted-foreground">
-              All entrants basis: {formatRatio(totalDonations, totalAllEntrants)}
+              All entrants basis: {formatRatio(totals.donations, totals.allEntrants)}
             </p>
           </CardContent>
         </Card>
@@ -263,17 +299,15 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Group Summary</CardTitle>
+          <CardTitle>Group Summary ({currentYear})</CardTitle>
           <CardDescription>
             Paid vs all entrants, entry revenue ex GST, and donations by event/year.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {summaryError ? (
-            <p className="text-sm text-red-600">{summaryError.message}</p>
-          ) : groupSummaries.length === 0 ? (
+          {groupSummaries.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              Add event groups and mappings to see revenue rollups.
+              No event groups found for {currentYear}.
             </p>
           ) : (
             <Table>
