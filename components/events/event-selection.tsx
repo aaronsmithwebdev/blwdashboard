@@ -192,6 +192,7 @@ export function EventSelection({
         />
       </div>
       <label className="flex items-center gap-2 text-sm text-muted-foreground">
+        <input type="hidden" name="projection" value="0" />
         <input
           type="checkbox"
           name="projection"

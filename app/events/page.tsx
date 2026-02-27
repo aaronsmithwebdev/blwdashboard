@@ -667,12 +667,16 @@ export default async function EventsPage({ searchParams }: { searchParams?: Sear
     : searchParams?.offset;
   const parsedOffset = offsetParam ? Number(offsetParam) : null;
 
-  const projectionParam = Array.isArray(searchParams?.projection)
-    ? searchParams?.projection[0]
-    : searchParams?.projection;
-  const projectionEnabled = ["1", "true", "on", "yes"].includes(
-    String(projectionParam ?? "").toLowerCase()
-  );
+  const projectionParams = Array.isArray(searchParams?.projection)
+    ? searchParams?.projection
+    : searchParams?.projection
+      ? [searchParams?.projection]
+      : [];
+  const projectionEnabled = projectionParams.length
+    ? projectionParams.some((value) =>
+        ["1", "true", "on", "yes"].includes(String(value).toLowerCase())
+      )
+    : true;
   const projectionDateParam = Array.isArray(searchParams?.projectionDate)
     ? searchParams?.projectionDate[0]
     : searchParams?.projectionDate;

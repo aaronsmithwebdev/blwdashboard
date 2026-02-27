@@ -1,14 +1,21 @@
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { coerceBoolean } from "@/lib/utils/dates";
 
 type GroupSummary = {
   id: string;
   categoryName: string;
   year: number;
-  totalDonations: number;
-  totalEntries: number;
   mappedEvents: number;
+  paidEntrants: number;
+  allEntrants: number;
+  unpaidEntrants: number;
+  entryRevenueExGst: number;
+  totalDonations: number;
+  donationsPerPaidEntrant: number | null;
+  donationsPerAllEntrant: number | null;
 };
 
 function formatCurrency(value: number) {
@@ -19,12 +26,10 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
-const kpis = [
-  { label: "Total Raised", detail: "Awaiting sync" },
-  { label: "Active Events", detail: "Awaiting sync" },
-  { label: "Avg. Gift", detail: "Awaiting sync" },
-  { label: "New Donors", detail: "Awaiting sync" }
-];
+function formatRatio(amount: number, count: number) {
+  if (count <= 0) return "--";
+  return formatCurrency(amount / count);
+}
 
 export default async function DashboardPage() {
   const supabase = createSupabaseAdminClient();
@@ -35,10 +40,10 @@ export default async function DashboardPage() {
     supabase
       .from("event_group_event")
       .select("event_group_id, event_id, include_in_reporting"),
-    supabase.from("donations").select("event_id, d_amount"),
+    supabase.from("donations").select("event_id, d_amount, d_refund_amount, d_status"),
     supabase
       .from("event_entries")
-      .select("event_id, history_id, is_paid, is_archived")
+      .select("event_id, history_id, is_paid, is_archived, total_paid_entry")
   ]);
 
   const [
@@ -64,15 +69,21 @@ export default async function DashboardPage() {
   }[];
   const mappings = (mappingsResult.data ?? []) as {
     event_group_id: string;
-    event_id: number;
+    event_id: number | string;
     include_in_reporting: boolean | null;
   }[];
-  const donations = (donationsResult.data ?? []) as { event_id: number; d_amount: number | null }[];
+  const donations = (donationsResult.data ?? []) as {
+    event_id: number | string | null;
+    d_amount: number | null;
+    d_refund_amount: number | null;
+    d_status: string | null;
+  }[];
   const entries = (entriesResult.data ?? []) as {
-    event_id: number;
+    event_id: number | string | null;
     history_id: number;
-    is_paid: boolean | null;
-    is_archived: boolean | null;
+    is_paid: boolean | string | number | null;
+    is_archived: boolean | string | number | null;
+    total_paid_entry: number | null;
   }[];
 
   const categoryById = new Map(categories.map((category) => [category.id, category.display_name]));
@@ -83,9 +94,14 @@ export default async function DashboardPage() {
       id: group.id,
       categoryName,
       year: group.year,
+      mappedEvents: 0,
+      paidEntrants: 0,
+      allEntrants: 0,
+      unpaidEntrants: 0,
+      entryRevenueExGst: 0,
       totalDonations: 0,
-      totalEntries: 0,
-      mappedEvents: 0
+      donationsPerPaidEntrant: null,
+      donationsPerAllEntrant: null
     });
   });
 
@@ -108,11 +124,30 @@ export default async function DashboardPage() {
     });
   });
 
+  entries.forEach((entry) => {
+    if (!entry.event_id) return;
+    if (coerceBoolean(entry.is_archived) === true) return;
+    const groupIds = eventToGroups.get(String(entry.event_id));
+    if (!groupIds) return;
+    const isPaid = coerceBoolean(entry.is_paid) === true;
+    const revenueExGst = Number(entry.total_paid_entry ?? 0) / 1.1;
+    groupIds.forEach((groupId) => {
+      const group = groupById.get(groupId);
+      if (!group) return;
+      group.allEntrants += 1;
+      if (isPaid) {
+        group.paidEntrants += 1;
+        group.entryRevenueExGst += revenueExGst;
+      }
+    });
+  });
+
   donations.forEach((donation) => {
     if (!donation.event_id) return;
+    if ((donation.d_status ?? "").toLowerCase() !== "paid") return;
     const groupIds = eventToGroups.get(String(donation.event_id));
     if (!groupIds) return;
-    const amount = Number(donation.d_amount ?? 0);
+    const amount = Number(donation.d_amount ?? 0) - Number(donation.d_refund_amount ?? 0);
     groupIds.forEach((groupId) => {
       const group = groupById.get(groupId);
       if (group) {
@@ -121,18 +156,37 @@ export default async function DashboardPage() {
     });
   });
 
+  groupById.forEach((group) => {
+    group.unpaidEntrants = Math.max(group.allEntrants - group.paidEntrants, 0);
+    group.donationsPerPaidEntrant =
+      group.paidEntrants > 0 ? group.totalDonations / group.paidEntrants : null;
+    group.donationsPerAllEntrant =
+      group.allEntrants > 0 ? group.totalDonations / group.allEntrants : null;
+  });
+
+  let totalPaidEntrants = 0;
+  let totalAllEntrants = 0;
+  let totalEntryRevenueExGst = 0;
+  let totalDonations = 0;
+
+  const includedEventIds = new Set(eventToGroups.keys());
   entries.forEach((entry) => {
     if (!entry.event_id) return;
-    if (entry.is_paid !== true || entry.is_archived === true) return;
-    const groupIds = eventToGroups.get(String(entry.event_id));
-    if (!groupIds) return;
-    groupIds.forEach((groupId) => {
-      const group = groupById.get(groupId);
-      if (group) {
-        group.totalEntries += 1;
-      }
-    });
+    if (!includedEventIds.has(String(entry.event_id))) return;
+    if (coerceBoolean(entry.is_archived) === true) return;
+    totalAllEntrants += 1;
+    if (coerceBoolean(entry.is_paid) === true) {
+      totalPaidEntrants += 1;
+      totalEntryRevenueExGst += Number(entry.total_paid_entry ?? 0) / 1.1;
+    }
   });
+  donations.forEach((donation) => {
+    if (!donation.event_id) return;
+    if (!includedEventIds.has(String(donation.event_id))) return;
+    if ((donation.d_status ?? "").toLowerCase() !== "paid") return;
+    totalDonations += Number(donation.d_amount ?? 0) - Number(donation.d_refund_amount ?? 0);
+  });
+  const totalUnpaidEntrants = Math.max(totalAllEntrants - totalPaidEntrants, 0);
 
   const groupSummaries = Array.from(groupById.values()).sort((a, b) => {
     if (a.categoryName === b.categoryName) {
@@ -146,38 +200,73 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-3xl font-semibold">Dashboard</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Monitor live event performance once Funraisin transactions are synced.
+          Live rollup of entrants, entry revenue, and donations.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {kpis.map((kpi) => (
-          <Card key={kpi.label}>
-            <CardHeader>
-              <CardDescription>{kpi.label}</CardDescription>
-              <CardTitle className="text-2xl">--</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground">{kpi.detail}</p>
-            </CardContent>
-          </Card>
-        ))}
+      {summaryError ? (
+        <Card>
+          <CardContent className="p-6">
+            <p className="text-sm text-red-600">{summaryError.message}</p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardDescription>Paid Entrants</CardDescription>
+            <CardTitle className="text-2xl">{totalPaidEntrants.toLocaleString("en-AU")}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>All Entrants</CardDescription>
+            <CardTitle className="text-2xl">{totalAllEntrants.toLocaleString("en-AU")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">
+              Includes paid and non-paid entrants.
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Unpaid Entrants</CardDescription>
+            <CardTitle className="text-2xl">{totalUnpaidEntrants.toLocaleString("en-AU")}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Entry Revenue (ex GST)</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(totalEntryRevenueExGst)}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Donations</CardDescription>
+            <CardTitle className="text-2xl">{formatCurrency(totalDonations)}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardDescription>Donations Per Entrant</CardDescription>
+            <CardTitle className="text-2xl">{formatRatio(totalDonations, totalPaidEntrants)}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">
+              All entrants basis: {formatRatio(totalDonations, totalAllEntrants)}
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Event Performance</CardTitle>
-          <CardDescription>Fundraising totals by day (placeholder)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 rounded-lg border border-dashed border-border/80 bg-gradient-to-br from-white/70 via-background to-muted/60" />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Group Revenue Summary</CardTitle>
-          <CardDescription>Rollup of donations and paid entries by event and year.</CardDescription>
+          <CardTitle>Group Summary</CardTitle>
+          <CardDescription>
+            Paid vs all entrants, entry revenue ex GST, and donations by event/year.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {summaryError ? (
@@ -192,19 +281,44 @@ export default async function DashboardPage() {
                 <TableRow>
                   <TableHead>Event</TableHead>
                   <TableHead>Year</TableHead>
-                  <TableHead>Mapped Events</TableHead>
-                  <TableHead>Paid Entries</TableHead>
-                  <TableHead>Total Donations</TableHead>
+                  <TableHead className="text-right">Mapped Events</TableHead>
+                  <TableHead className="text-right">Paid Entrants</TableHead>
+                  <TableHead className="text-right">All Entrants</TableHead>
+                  <TableHead className="text-right">Unpaid Entrants</TableHead>
+                  <TableHead className="text-right">Entry Revenue (ex GST)</TableHead>
+                  <TableHead className="text-right">Donations</TableHead>
+                  <TableHead className="text-right">Donations / Paid Entrant</TableHead>
+                  <TableHead className="text-right">Donations / All Entrant</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {groupSummaries.map((group) => (
                   <TableRow key={group.id}>
-                    <TableCell>{group.categoryName}</TableCell>
+                    <TableCell>
+                      <Link
+                        href={`/events?group=${group.id}`}
+                        className="font-medium text-primary hover:underline"
+                      >
+                        {group.categoryName}
+                      </Link>
+                    </TableCell>
                     <TableCell>{group.year}</TableCell>
-                    <TableCell>{group.mappedEvents}</TableCell>
-                    <TableCell>{group.totalEntries}</TableCell>
-                    <TableCell>{formatCurrency(group.totalDonations)}</TableCell>
+                    <TableCell className="text-right">{group.mappedEvents}</TableCell>
+                    <TableCell className="text-right">{group.paidEntrants}</TableCell>
+                    <TableCell className="text-right">{group.allEntrants}</TableCell>
+                    <TableCell className="text-right">{group.unpaidEntrants}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(group.entryRevenueExGst)}</TableCell>
+                    <TableCell className="text-right">{formatCurrency(group.totalDonations)}</TableCell>
+                    <TableCell className="text-right">
+                      {group.donationsPerPaidEntrant !== null
+                        ? formatCurrency(group.donationsPerPaidEntrant)
+                        : "--"}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {group.donationsPerAllEntrant !== null
+                        ? formatCurrency(group.donationsPerAllEntrant)
+                        : "--"}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

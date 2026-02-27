@@ -5,8 +5,6 @@ const navItems = [
   { label: "Event View", href: "/events" },
   { label: "Sync", href: "/sync" },
   { label: "Reports", href: "/reports" },
-  { label: "Retention", href: "/reports/retention" },
-  { label: "Entries Debug", href: "/reports/entries" },
   { label: "Settings", href: "/settings" }
 ];
 

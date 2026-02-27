@@ -264,6 +264,9 @@ export async function createEventGroupDiscount(
   if (discountAmount && !Number.isFinite(amountValue)) {
     return errorState("Discount amount must be a number.");
   }
+  if (startsAt && endsAt && startsAt > endsAt) {
+    return errorState("Starts at must be on or before Ends at.");
+  }
 
   const supabase = createSupabaseAdminClient();
   const { error } = await supabase.from("event_group_discount").insert({
@@ -303,6 +306,9 @@ export async function updateEventGroupDiscount(
   const amountValue = discountAmount ? Number(discountAmount) : null;
   if (discountAmount && !Number.isFinite(amountValue)) {
     return errorState("Discount amount must be a number.");
+  }
+  if (startsAt && endsAt && startsAt > endsAt) {
+    return errorState("Starts at must be on or before Ends at.");
   }
 
   const supabase = createSupabaseAdminClient();

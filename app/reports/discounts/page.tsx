@@ -106,6 +106,16 @@ function resolveDiscountLabelMeta(label: string): DiscountLabelMeta {
   };
 }
 
+function normalizeTierWindow(startsAt: string | null, endsAt: string | null) {
+  if (!startsAt || !endsAt) {
+    return { startsAt, endsAt };
+  }
+  if (startsAt <= endsAt) {
+    return { startsAt, endsAt };
+  }
+  return { startsAt: endsAt, endsAt: startsAt };
+}
+
 function toSydneyDate(value?: string | null) {
   if (!value) return null;
   const trimmed = value.trim();
@@ -216,7 +226,14 @@ export default async function DiscountReportPage({
     return <p className="text-sm text-red-600">{mappingsResult.error.message}</p>;
   }
 
-  const discounts = (discountsResult.data ?? []) as DiscountTier[];
+  const discounts = ((discountsResult.data ?? []) as DiscountTier[]).map((tier) => {
+    const normalizedWindow = normalizeTierWindow(tier.starts_at, tier.ends_at);
+    return {
+      ...tier,
+      starts_at: normalizedWindow.startsAt,
+      ends_at: normalizedWindow.endsAt
+    };
+  });
   const mappings = (mappingsResult.data ?? []) as EventMapping[];
 
   const eventIds = Array.from(
@@ -513,7 +530,7 @@ export default async function DiscountReportPage({
                     <TableRow>
                       <TableHead rowSpan={2}>Discount name</TableHead>
                       {selectedYearsSorted.map((year) => (
-                        <TableHead key={year} colSpan={4} className="text-center">
+                        <TableHead key={year} colSpan={3} className="text-center">
                           {year}
                         </TableHead>
                       ))}
@@ -528,9 +545,6 @@ export default async function DiscountReportPage({
                         </TableHead>,
                         <TableHead key={`${year}-revenue`} className="text-right">
                           Revenue
-                        </TableHead>,
-                        <TableHead key={`${year}-revenue-ex`} className="text-right">
-                          Revenue ex GST
                         </TableHead>
                       ])}
                     </TableRow>
@@ -553,9 +567,6 @@ export default async function DiscountReportPage({
                               </TableCell>,
                               <TableCell key={`${year}-${labelMeta.key}-revenue`} className="text-right">
                                 —
-                              </TableCell>,
-                              <TableCell key={`${year}-${labelMeta.key}-revenue-ex`} className="text-right">
-                                —
                               </TableCell>
                             ];
                           }
@@ -573,9 +584,6 @@ export default async function DiscountReportPage({
                             </TableCell>,
                             <TableCell key={`${year}-${labelMeta.key}-revenue`} className="text-right">
                               {formatCurrency(revenue)}
-                            </TableCell>,
-                            <TableCell key={`${year}-${labelMeta.key}-revenue-ex`} className="text-right">
-                              {formatCurrency(revenue / 1.1)}
                             </TableCell>
                           ];
                         })}
@@ -597,9 +605,6 @@ export default async function DiscountReportPage({
                             </TableCell>,
                             <TableCell key={`${year}-total-revenue`} className="text-right">
                               —
-                            </TableCell>,
-                            <TableCell key={`${year}-total-revenue-ex`} className="text-right">
-                              —
                             </TableCell>
                           ];
                         }
@@ -615,9 +620,6 @@ export default async function DiscountReportPage({
                           </TableCell>,
                           <TableCell key={`${year}-total-revenue`} className="text-right">
                             {formatCurrency(totalRevenue)}
-                          </TableCell>,
-                          <TableCell key={`${year}-total-revenue-ex`} className="text-right">
-                            {formatCurrency(totalRevenue / 1.1)}
                           </TableCell>
                         ];
                       })}
