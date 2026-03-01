@@ -1,6 +1,11 @@
 import { DateTime } from "luxon";
 import { NextResponse } from "next/server";
 
+import { POST as syncDonations } from "@/app/api/sync/donations/route";
+import { POST as syncEventEntries } from "@/app/api/sync/event-entries/route";
+import { POST as syncEvents } from "@/app/api/sync/events/route";
+import { POST as syncParticipants } from "@/app/api/sync/participants/route";
+import { POST as syncTransactions } from "@/app/api/sync/transactions/route";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { parseDateOnly, toSydneyISOEnd, toSydneyISOStart } from "@/lib/utils/dates";
 
@@ -17,6 +22,7 @@ type SyncEndpoint = {
   endpoint: "events" | "transactions" | "event_entries" | "participants" | "donations";
   path: string;
   usesDateRange: boolean;
+  run: (request: Request, fromDate: string, toDate: string) => Promise<Response>;
 };
 
 type SyncResponse = {
@@ -28,11 +34,64 @@ type SyncResponse = {
 };
 
 const SYNC_ENDPOINTS: SyncEndpoint[] = [
-  { endpoint: "events", path: "/api/sync/events", usesDateRange: false },
-  { endpoint: "transactions", path: "/api/sync/transactions", usesDateRange: true },
-  { endpoint: "event_entries", path: "/api/sync/event-entries", usesDateRange: true },
-  { endpoint: "participants", path: "/api/sync/participants", usesDateRange: true },
-  { endpoint: "donations", path: "/api/sync/donations", usesDateRange: true }
+  {
+    endpoint: "events",
+    path: "/api/sync/events",
+    usesDateRange: false,
+    run: async () => syncEvents()
+  },
+  {
+    endpoint: "transactions",
+    path: "/api/sync/transactions",
+    usesDateRange: true,
+    run: async (request, fromDate, toDate) =>
+      syncTransactions(
+        new Request(new URL("/api/sync/transactions", request.url), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromDate, toDate })
+        })
+      )
+  },
+  {
+    endpoint: "event_entries",
+    path: "/api/sync/event-entries",
+    usesDateRange: true,
+    run: async (request, fromDate, toDate) =>
+      syncEventEntries(
+        new Request(new URL("/api/sync/event-entries", request.url), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromDate, toDate })
+        })
+      )
+  },
+  {
+    endpoint: "participants",
+    path: "/api/sync/participants",
+    usesDateRange: true,
+    run: async (request, fromDate, toDate) =>
+      syncParticipants(
+        new Request(new URL("/api/sync/participants", request.url), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromDate, toDate })
+        })
+      )
+  },
+  {
+    endpoint: "donations",
+    path: "/api/sync/donations",
+    usesDateRange: true,
+    run: async (request, fromDate, toDate) =>
+      syncDonations(
+        new Request(new URL("/api/sync/donations", request.url), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fromDate, toDate })
+        })
+      )
+  }
 ];
 
 function toSydneyDateOnly(value: string | null | undefined) {
@@ -83,32 +142,43 @@ async function runEndpoint(
   request: Request,
   endpoint: SyncEndpoint,
   fromDate: string,
-  toDate: string,
-  forwardedHeaders: Record<string, string>
+  toDate: string
 ) {
-  const url = new URL(endpoint.path, request.url);
-  const body = endpoint.usesDateRange ? { fromDate, toDate } : {};
-
-  const response = await fetch(url.toString(), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...forwardedHeaders },
-    body: JSON.stringify(body)
-  });
+  let response: Response;
+  try {
+    response = await endpoint.run(request, fromDate, toDate);
+  } catch (error) {
+    return {
+      endpoint: endpoint.endpoint,
+      ok: false,
+      status: 500,
+      pagesFetched: 0,
+      rowsUpserted: 0,
+      lastOffset: 0,
+      errors: [error instanceof Error ? error.message : `${endpoint.endpoint} sync crashed.`]
+    };
+  }
 
   const rawText = await response.text();
   const payload = parseSyncPayload(rawText);
+  const okWithPayload = response.ok && payload !== null;
   const endpointErrors =
     payload?.errors && payload.errors.length > 0
       ? payload.errors
       : payload?.error
         ? [payload.error]
-        : response.ok
+        : okWithPayload
           ? []
-          : [rawText || `${endpoint.endpoint} sync failed with status ${response.status}.`];
+          : [
+              rawText ||
+                (response.ok
+                  ? `${endpoint.endpoint} sync returned an unreadable response.`
+                  : `${endpoint.endpoint} sync failed with status ${response.status}.`)
+            ];
 
   return {
     endpoint: endpoint.endpoint,
-    ok: response.ok,
+    ok: okWithPayload,
     status: response.status,
     pagesFetched: payload?.pagesFetched ?? 0,
     rowsUpserted: payload?.rowsUpserted ?? 0,
@@ -167,18 +237,9 @@ export async function POST(request: Request) {
   }
 
   const runs = [];
-  const forwardedHeaders: Record<string, string> = {};
-  const cookieHeader = request.headers.get("cookie");
-  if (cookieHeader) {
-    forwardedHeaders.cookie = cookieHeader;
-  }
-  const authorizationHeader = request.headers.get("authorization");
-  if (authorizationHeader) {
-    forwardedHeaders.authorization = authorizationHeader;
-  }
   for (const endpoint of SYNC_ENDPOINTS) {
     // Keep endpoint syncs ordered so dependent data stays predictable in logs/UI.
-    const run = await runEndpoint(request, endpoint, fromDate, toDate, forwardedHeaders);
+    const run = await runEndpoint(request, endpoint, fromDate, toDate);
     runs.push(run);
   }
 
