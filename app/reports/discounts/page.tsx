@@ -261,27 +261,38 @@ export default async function DiscountReportPage({
 
   let entries: EventEntry[] = [];
   if (eventIds.length) {
-    let offset = 0;
-    while (true) {
-      const entriesQuery = supabase
-        .from("event_entries")
-        .select("history_id, event_id, is_paid, date_paid, date_created, total_paid_entry")
-        .in("event_id", eventIds)
-        .order("history_id", { ascending: true })
-        .range(offset, offset + PAGE_SIZE - 1);
+    for (const eventId of eventIds) {
+      let lastHistoryId: number | null = null;
 
-      const { data, error } = await entriesQuery;
-      if (error) {
-        return <p className="text-sm text-red-600">{error.message}</p>;
+      while (true) {
+        let entriesQuery = supabase
+          .from("event_entries")
+          .select("history_id, event_id, is_paid, date_paid, date_created, total_paid_entry")
+          .eq("event_id", eventId)
+          .order("history_id", { ascending: true })
+          .limit(PAGE_SIZE);
+
+        if (lastHistoryId !== null) {
+          entriesQuery = entriesQuery.gt("history_id", lastHistoryId);
+        }
+
+        const { data, error } = await entriesQuery;
+        if (error) {
+          return <p className="text-sm text-red-600">{error.message}</p>;
+        }
+
+        const batch = (data ?? []) as EventEntry[];
+        entries.push(...batch);
+
+        if (batch.length < PAGE_SIZE) {
+          break;
+        }
+
+        lastHistoryId = batch[batch.length - 1]?.history_id ?? null;
+        if (lastHistoryId === null) {
+          break;
+        }
       }
-
-      const batch = (data ?? []) as EventEntry[];
-      entries.push(...batch);
-
-      if (batch.length < PAGE_SIZE) {
-        break;
-      }
-      offset += PAGE_SIZE;
     }
   }
 
