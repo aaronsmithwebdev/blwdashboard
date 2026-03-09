@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { coerceBoolean, toSydneyISOEnd, toSydneyISOStart } from "@/lib/utils/dates";
+import { coerceBoolean } from "@/lib/utils/dates";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,6 +57,12 @@ type DiscountLabelMeta = {
   key: string;
   label: string;
   order: number;
+};
+
+const UNMATCHED_DISCOUNT_META: DiscountLabelMeta = {
+  key: "unmatched",
+  label: "Outside configured windows",
+  order: 99
 };
 
 const DISCOUNT_LABEL_BUCKETS = [
@@ -245,8 +251,6 @@ export default async function DiscountReportPage({
   );
 
   const tiersByGroup = new Map<string, DiscountTier[]>();
-  const starts = discounts.map((tier) => tier.starts_at).filter(Boolean) as string[];
-  const ends = discounts.map((tier) => tier.ends_at).filter(Boolean) as string[];
   discounts.forEach((tier) => {
     if (!tiersByGroup.has(tier.event_group_id)) {
       tiersByGroup.set(tier.event_group_id, []);
@@ -255,33 +259,15 @@ export default async function DiscountReportPage({
   });
   tiersByGroup.forEach((list) => list.sort((a, b) => (a.ends_at ?? "").localeCompare(b.ends_at ?? "")));
 
-  const minStart = starts.length ? starts.sort()[0] : null;
-  const maxEnd = ends.length ? ends.sort()[ends.length - 1] : null;
-
-  const hasDateBoundTiers = starts.length > 0 && ends.length > 0;
-
   let entries: EventEntry[] = [];
-  if (eventIds.length && hasDateBoundTiers) {
+  if (eventIds.length) {
     let offset = 0;
     while (true) {
-      let entriesQuery = supabase
+      const entriesQuery = supabase
         .from("event_entries")
         .select("history_id, event_id, is_paid, date_paid, date_created, total_paid_entry")
         .in("event_id", eventIds)
         .range(offset, offset + PAGE_SIZE - 1);
-
-      if (minStart) {
-        const minIso = toSydneyISOStart(minStart);
-        if (minIso) {
-          entriesQuery = entriesQuery.or(`date_paid.gte.${minIso},date_created.gte.${minIso}`);
-        }
-      }
-      if (maxEnd) {
-        const maxIso = toSydneyISOEnd(maxEnd);
-        if (maxIso) {
-          entriesQuery = entriesQuery.or(`date_paid.lte.${maxIso},date_created.lte.${maxIso}`);
-        }
-      }
 
       const { data, error } = await entriesQuery;
       if (error) {
@@ -310,6 +296,8 @@ export default async function DiscountReportPage({
   });
 
   const rowMap = new Map<string, EventRow>();
+  const totalEntrantsByGroup = new Map<string, number>();
+  const totalRevenueByGroup = new Map<string, number>();
 
   groupsForYears.forEach((group) => {
     const tiers = tiersByGroup.get(group.id) ?? [];
@@ -331,42 +319,59 @@ export default async function DiscountReportPage({
 
   entries.forEach((entry) => {
     if (!coerceBoolean(entry.is_paid)) return;
-    const paidDate = toSydneyDate(entry.date_paid ?? entry.date_created);
-    if (!paidDate) return;
     if (entry.event_id === null || entry.event_id === undefined) return;
     const groupIdsForEvent = groupIdsByEvent.get(String(entry.event_id));
     if (!groupIdsForEvent) return;
+    const paidDate = toSydneyDate(entry.date_paid ?? entry.date_created);
+    const entryRevenue = Number(entry.total_paid_entry ?? 0);
 
     groupIdsForEvent.forEach((groupId) => {
+      totalEntrantsByGroup.set(groupId, (totalEntrantsByGroup.get(groupId) ?? 0) + 1);
+      totalRevenueByGroup.set(groupId, (totalRevenueByGroup.get(groupId) ?? 0) + entryRevenue);
+
       const tiers = tiersByGroup.get(groupId);
       if (!tiers || tiers.length === 0) return;
-      tiers.forEach((tier) => {
-        if (!tier.starts_at || !tier.ends_at) return;
-        if (paidDate < tier.starts_at || paidDate > tier.ends_at) return;
 
-        const key = `${groupId}:${tier.id}`;
-        const labelMeta = resolveDiscountLabelMeta(tier.label);
+      const matchedTier =
+        paidDate === null
+          ? null
+          : tiers.find((tier) => {
+              if (!tier.starts_at || !tier.ends_at) return false;
+              return paidDate >= tier.starts_at && paidDate <= tier.ends_at;
+            }) ?? null;
+
+      if (!matchedTier) {
+        const key = `${groupId}:${UNMATCHED_DISCOUNT_META.key}`;
         const row = rowMap.get(key) ?? {
           groupId,
-          discountKey: labelMeta.key,
-          discountName: labelMeta.label,
+          discountKey: UNMATCHED_DISCOUNT_META.key,
+          discountName: UNMATCHED_DISCOUNT_META.label,
           entrants: 0,
           revenue: 0,
-          startsAt: tier.starts_at,
-          endsAt: tier.ends_at
+          startsAt: null,
+          endsAt: null
         };
         row.entrants += 1;
-        row.revenue += Number(entry.total_paid_entry ?? 0);
+        row.revenue += entryRevenue;
         rowMap.set(key, row);
-      });
-    });
-  });
+        return;
+      }
 
-  const totalEntrantsByGroup = new Map<string, number>();
-  const totalRevenueByGroup = new Map<string, number>();
-  rowMap.forEach((row) => {
-    totalEntrantsByGroup.set(row.groupId, (totalEntrantsByGroup.get(row.groupId) ?? 0) + row.entrants);
-    totalRevenueByGroup.set(row.groupId, (totalRevenueByGroup.get(row.groupId) ?? 0) + row.revenue);
+      const key = `${groupId}:${matchedTier.id}`;
+      const labelMeta = resolveDiscountLabelMeta(matchedTier.label);
+      const row = rowMap.get(key) ?? {
+        groupId,
+        discountKey: labelMeta.key,
+        discountName: labelMeta.label,
+        entrants: 0,
+        revenue: 0,
+        startsAt: matchedTier.starts_at,
+        endsAt: matchedTier.ends_at
+      };
+      row.entrants += 1;
+      row.revenue += entryRevenue;
+      rowMap.set(key, row);
+    });
   });
 
   const rowsByGroupAndKey = new Map<string, Map<string, EventRow>>();
@@ -416,6 +421,9 @@ export default async function DiscountReportPage({
             labelByKey.set(labelMeta.key, labelMeta);
           }
         });
+        if (rowsByGroupAndKey.get(group.id)?.has(UNMATCHED_DISCOUNT_META.key)) {
+          labelByKey.set(UNMATCHED_DISCOUNT_META.key, UNMATCHED_DISCOUNT_META);
+        }
       });
       const labels = Array.from(labelByKey.values()).sort((a, b) => {
         if (a.order === b.order) return a.label.localeCompare(b.label);
