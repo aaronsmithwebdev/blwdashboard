@@ -267,6 +267,7 @@ export default async function DiscountReportPage({
         .from("event_entries")
         .select("history_id, event_id, is_paid, date_paid, date_created, total_paid_entry")
         .in("event_id", eventIds)
+        .order("history_id", { ascending: true })
         .range(offset, offset + PAGE_SIZE - 1);
 
       const { data, error } = await entriesQuery;
